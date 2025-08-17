@@ -15,7 +15,7 @@ It enables developers to interact with containers (start, stop, copy files, run 
 ## Installation
 
 ```bash
-go get github.com/yourusername/container-runtime
+go get github.com/evertonagilar/container-runtime
 ```
 
 ## API Reference
