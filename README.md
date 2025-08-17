@@ -1,16 +1,18 @@
-# Container Runtime Library
+# 🐳 Container Runtime Library
 
 This project provides a Go interface (`TContainerRuntime`) and a default Docker implementation (`DockerRuntime`) to abstract container runtime operations.  
 It enables developers to interact with containers (start, stop, copy files, run commands, etc.) in a consistent way, regardless of the underlying runtime.
 
-## Features
+## ⚡ Features
 
-- Start and stop containers
-- Execute commands inside containers
-- Copy files into containers
-- Run ad-hoc commands in temporary containers
-- Show logs of running containers
-- Verify container status
+- ⬆️ Start and stop containers
+- 🖥️ Execute commands inside containers
+- 📂 Copy files into containers
+- 🏃 Run ad-hoc commands in temporary containers
+- 📜 Show logs of running containers
+- 🔍 Verify container status
+
+## 📦 Installation
 
 ## Installation
 
