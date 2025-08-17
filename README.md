@@ -12,14 +12,6 @@ It enables developers to interact with containers (start, stop, copy files, run 
 - 📜 Show logs of running containers
 - 🔍 Verify container status
 
-## 📦 Installation
-
-## Installation
-
-```bash
-go get github.com/evertonagilar/container-runtime
-```
-
 ## API Reference
 
 The main interface is:
