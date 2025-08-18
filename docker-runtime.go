@@ -16,28 +16,6 @@ type DockerRuntime struct {
 	config TDockerConfig
 }
 
-// NewDockerRuntime cria uma instância de DockerRuntime local
-func NewDockerRuntime() (TContainerRuntime, error) {
-	dockerConfig := TDockerConfig{}
-	return NewDockerRuntimeCustom(dockerConfig)
-}
-
-// NewDockerRuntimeCustom cria uma instância de DockerRuntime com conexão TLS e valida se o Docker está presente.
-func NewDockerRuntimeCustom(dockerConfig TDockerConfig) (TContainerRuntime, error) {
-	dockerBinPath, err := getDockerBinPath()
-	if err != nil {
-		return nil, fmt.Errorf("Docker não encontrado: %w", err)
-	}
-	dockerConfig.dockerBinPath = dockerBinPath
-
-	// Valida os caminhos TLS
-	if err := validateTLSPaths(dockerConfig); err != nil {
-		return nil, err
-	}
-
-	return DockerRuntime{config: dockerConfig}, nil
-}
-
 func (r DockerRuntime) buildDockerArgs(args ...string) []string {
 	finalArgs := []string{}
 	if r.config.RemoteHost != "" {
