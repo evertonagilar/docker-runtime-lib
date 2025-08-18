@@ -18,7 +18,7 @@ The main interface is:
 
 ```go
 type TContainerRuntime interface {
-    Up(composeFile string) error
+    Up(containerName, composeFile string, WaitContainerRunning bool) error
     Down(containerName string) error
     CopyToContainer(srcPath, containerName, destPath string) error
     IsContainerRunning(containerName string) (bool, error)
@@ -31,7 +31,7 @@ type TContainerRuntime interface {
 
 ### Function Descriptions
 
-- **Up(composeFile string) error**  
+- **Up(containerName, composeFile string, WaitContainerRunning bool) error**  
   Starts the containers defined in the provided Docker Compose file.
 
 - **Down(containerName string) error**  
@@ -42,6 +42,9 @@ type TContainerRuntime interface {
 
 - **IsContainerRunning(containerName string) (bool, error)**  
   Checks whether a given container is currently running.
+
+- **WaitContainerRunning(containerName string, timeout time.Duration) error**  
+  Waits until the specified container is running, or returns an error if the timeout is reached.
 
 - **StopContainer(containerName string) error**  
   Stops the specified running container.

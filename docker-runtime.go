@@ -9,56 +9,88 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
-type DockerRuntime struct{}
-
-var dockerBin string
-
-// getDockerBinPath retorna o caminho do binário docker, cacheando o resultado.
-func getDockerBinPath() (string, error) {
-	if dockerBin != "" {
-		return dockerBin, nil
-	}
-
-	path, err := exec.LookPath("docker")
-	if err != nil {
-		return "", fmt.Errorf("não encontrei o binário do docker no PATH")
-	}
-
-	dockerBin = path
-	return dockerBin, nil
+type DockerRuntime struct {
+	config TDockerConfig
 }
 
-func (r DockerRuntime) Up(composeFile string) error {
-	docker, err := getDockerBinPath()
+// NewDockerRuntime cria uma instância de DockerRuntime local
+func NewDockerRuntime() (TContainerRuntime, error) {
+	dockerConfig := TDockerConfig{}
+	return NewDockerRuntimeCustom(dockerConfig)
+}
+
+// NewDockerRuntimeCustom cria uma instância de DockerRuntime com conexão TLS e valida se o Docker está presente.
+func NewDockerRuntimeCustom(dockerConfig TDockerConfig) (TContainerRuntime, error) {
+	dockerBinPath, err := getDockerBinPath()
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("Docker não encontrado: %w", err)
 	}
-	cmd := exec.Command(docker, "compose", "-f", composeFile, "up", "-d")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	dockerConfig.dockerBinPath = dockerBinPath
+
+	// Valida os caminhos TLS
+	if err := validateTLSPaths(dockerConfig); err != nil {
+		return nil, err
+	}
+
+	return DockerRuntime{config: dockerConfig}, nil
+}
+
+func (r DockerRuntime) buildDockerArgs(args ...string) []string {
+	finalArgs := []string{}
+	if r.config.RemoteHost != "" {
+		finalArgs = append(finalArgs, "--host", r.config.RemoteHost)
+	}
+	if r.config.TLSCaCertPath != "" {
+		finalArgs = append(finalArgs, "--tlscacert", r.config.TLSCaCertPath)
+	}
+	if r.config.TLSCertPath != "" {
+		finalArgs = append(finalArgs, "--tlscert", r.config.TLSCertPath)
+	}
+	if r.config.TLSKeyPath != "" {
+		finalArgs = append(finalArgs, "--tlskey", r.config.TLSKeyPath)
+	}
+	if r.config.TLSCaCertPath != "" || r.config.TLSCertPath != "" || r.config.TLSKeyPath != "" {
+		finalArgs = append(finalArgs, "--tlsverify")
+	}
+	finalArgs = append(finalArgs, args...)
+	return finalArgs
+}
+
+// buildDockerCmd cria *exec.Cmd com opção de capturar saída
+func (r DockerRuntime) buildDockerCmd(captureOutput bool, args ...string) *exec.Cmd {
+	cmd := exec.Command(r.config.dockerBinPath, r.buildDockerArgs(args...)...)
+	if !captureOutput {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd
+}
+
+func (r DockerRuntime) Up(containerName, composeFile string, WaitContainerRunning bool) error {
+	cmd := r.buildDockerCmd(false, "compose", "-f", composeFile, "up", "-d")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("erro ao executar docker-compose up: %w", err)
+	}
+
+	if WaitContainerRunning {
+		if err := r.WaitContainerRunning(containerName, 60*time.Second); err != nil {
+			return fmt.Errorf("container não subiu corretamente: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (r DockerRuntime) Down(containerName string) error {
-	docker, err := getDockerBinPath()
-	if err != nil {
-		return err
-	}
-
-	// Para o container
-	stopCmd := exec.Command(docker, "stop", containerName)
-	stopCmd.Stdout = os.Stdout
-	stopCmd.Stderr = os.Stderr
+	stopCmd := r.buildDockerCmd(false, "stop", containerName)
 	if err := stopCmd.Run(); err != nil {
 		return fmt.Errorf("falha ao parar container: %w", err)
 	}
 
-	// Remove o container
-	rmCmd := exec.Command(docker, "rm", containerName)
-	rmCmd.Stdout = os.Stdout
-	rmCmd.Stderr = os.Stderr
+	rmCmd := r.buildDockerCmd(false, "rm", containerName)
 	if err := rmCmd.Run(); err != nil {
 		return fmt.Errorf("falha ao remover container: %w", err)
 	}
@@ -67,29 +99,17 @@ func (r DockerRuntime) Down(containerName string) error {
 }
 
 func (r DockerRuntime) CopyToContainer(srcFileName, containerName, dstFileName string) error {
-	docker, err := getDockerBinPath()
-	if err != nil {
-		return err
-	}
-
-	// Usa o mesmo diretório do destino para evitar problemas de permissão
 	destDir := path.Dir(dstFileName)
 	tempName := filepath.Base(dstFileName) + ".tmp"
 	tmpDestPath := path.Join(destDir, tempName)
 	srcFileName = filepath.ToSlash(srcFileName)
 
-	// Etapa 1: copia para o arquivo temporário no destino
-	copyCmd := exec.Command(docker, "cp", "-L", "-q", srcFileName, fmt.Sprintf("%s:%s", containerName, tmpDestPath))
-	copyCmd.Stdout = os.Stdout
-	copyCmd.Stderr = os.Stderr
+	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", srcFileName, fmt.Sprintf("%s:%s", containerName, tmpDestPath))
 	if err := copyCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao copiar para o container: %w", err)
 	}
 
-	// Etapa 2: move de forma atômica para o nome final
-	mvCmd := exec.Command(docker, "exec", containerName, "mv", tmpDestPath, dstFileName)
-	mvCmd.Stdout = os.Stdout
-	mvCmd.Stderr = os.Stderr
+	mvCmd := r.buildDockerCmd(false, "exec", containerName, "mv", tmpDestPath, dstFileName)
 	if err := mvCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao mover arquivo dentro do container: %w", err)
 	}
@@ -98,52 +118,50 @@ func (r DockerRuntime) CopyToContainer(srcFileName, containerName, dstFileName s
 }
 
 func (r DockerRuntime) IsContainerRunning(containerName string) (bool, error) {
-	docker, err := getDockerBinPath()
+	cmd := exec.Command(r.config.dockerBinPath, r.buildDockerArgs("inspect", "-f", "{{.State.Running}}", containerName)...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if err != nil {
-		return false, err
+		return false, nil
 	}
 
-	cmd := exec.Command(docker, "inspect", "-f", "{{.State.Running}}", containerName)
-	out, err := cmd.Output()
-	if err != nil {
-		return false, nil // container não existe ou não está rodando
+	return strings.TrimSpace(stdout.String()) == "true", nil
+}
+
+func (r DockerRuntime) WaitContainerRunning(containerName string, timeout time.Duration) error {
+	timeoutChan := time.After(timeout)
+	tick := time.Tick(1 * time.Second)
+	for {
+		select {
+		case <-timeoutChan:
+			return fmt.Errorf("timeout esperando container %s subir", containerName)
+		case <-tick:
+			running, _ := r.IsContainerRunning(containerName)
+			if running {
+				return nil
+			}
+		}
 	}
-	return string(out) == "true\n", nil
 }
 
 func (r DockerRuntime) StopContainer(containerName string) error {
-	docker, err := getDockerBinPath()
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(docker, "stop", containerName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := r.buildDockerCmd(false, "stop", containerName)
 	return cmd.Run()
 }
 
 func (r DockerRuntime) ShowLogs(containerName string) error {
-	docker, err := getDockerBinPath()
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(docker, "logs", "-f", containerName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := r.buildDockerCmd(false, "logs", "-f", containerName)
 	return cmd.Run()
 }
 
 func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error {
-	docker, err := getDockerBinPath()
-	if err != nil {
-		return err
-	}
-
 	args := []string{"run", "--rm"}
+
 	if runtime.GOOS != "windows" {
-		// Só adiciona UID/GID se não forem vazios ou "0"
 		if uid != "" && uid != "0" {
 			args = append(args, "-e", "HOST_UID="+uid)
 		}
@@ -152,54 +170,63 @@ func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, ot
 		}
 	}
 
-	// Volumes
 	for _, v := range volumeList {
 		args = append(args, "-v", v)
 	}
-
-	// Diretório de trabalho
 	if chDir != "" {
 		args = append(args, "-w", chDir)
 	}
-
-	// Outras opções
 	args = append(args, otherOptionsList...)
-
-	// Imagem
 	args = append(args, image)
-
-	// Comando final no container
 	args = append(args, "bash", "-c", cmdStr)
 
 	if debug {
-		fmt.Printf("🔨 Comando docker: %s %s\n", docker, strings.Join(args, " "))
+		fmt.Printf("🔨 Comando docker: %s %s\n", r.config.dockerBinPath, strings.Join(args, " "))
 	}
 
-	cmd := exec.Command(docker, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
+	cmd := r.buildDockerCmd(false, args...)
 	return cmd.Run()
 }
 
-func (d DockerRuntime) ExecInContainer(containerName string, cmd []string) ([]byte, error) {
-	docker, err := getDockerBinPath()
-	if err != nil {
-		return nil, err
-	}
+func (r DockerRuntime) ExecInContainer(containerName string, cmdArgs []string) ([]byte, error) {
+	args := append([]string{"exec", containerName}, cmdArgs...)
+	cmd := r.buildDockerCmd(true, args...)
 
-	args := append([]string{"exec", containerName}, cmd...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-	command := exec.Command(docker, args...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-
-	err = command.Run()
+	err := cmd.Run()
 	if err != nil {
 		return nil, fmt.Errorf("erro ao executar comando no container: %w. Stderr: %s", err, stderr.String())
 	}
 
 	return stdout.Bytes(), nil
+}
+
+// -------------------- Auxiliares --------------------
+
+func getDockerBinPath() (string, error) {
+	path, err := exec.LookPath("docker")
+	if err != nil {
+		return "", fmt.Errorf("não encontrei o binário do docker no PATH")
+	}
+	return path, nil
+}
+
+func validateTLSPaths(cfg TDockerConfig) error {
+	paths := map[string]string{
+		"TLS CA Cert": cfg.TLSCaCertPath,
+		"TLS Cert":    cfg.TLSCertPath,
+		"TLS Key":     cfg.TLSKeyPath,
+	}
+
+	for name, path := range paths {
+		if path != "" {
+			if _, err := os.Stat(path); err != nil {
+				return fmt.Errorf("%s não encontrado em '%s': %w", name, path, err)
+			}
+		}
+	}
+	return nil
 }

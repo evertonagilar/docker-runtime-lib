@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Função auxiliar para criar runtime ou pular teste
@@ -21,8 +22,8 @@ func TestUpAndDown(t *testing.T) {
 	composeFile := createTempCompose(t)
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
-	t.Log("⬆️ Subindo container...")
-	if err := r.Up(composeFile); err != nil {
+	t.Log("⬆️  Subindo container...")
+	if err := r.Up("test_container", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	t.Log("✅ Container subiu com sucesso")
@@ -39,8 +40,8 @@ func TestIsContainerRunning(t *testing.T) {
 	composeFile := createTempCompose(t)
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
-	t.Log("⬆️ Subindo container para teste de status...")
-	if err := r.Up(composeFile); err != nil {
+	t.Log("⬆️  Subindo container para teste de status...")
+	if err := r.Up("test_container", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	defer func() {
@@ -51,10 +52,20 @@ func TestIsContainerRunning(t *testing.T) {
 	}()
 
 	t.Log("🔍 Verificando se container está rodando...")
-	running, err := r.IsContainerRunning("test_container")
-	if err != nil {
-		t.Fatalf("erro inesperado: %v", err)
+
+	var running bool
+	var err error
+	for i := 0; i < 5; i++ {
+		running, err = r.IsContainerRunning("test_container")
+		if err != nil {
+			t.Fatalf("erro inesperado: %v", err)
+		}
+		if running {
+			break
+		}
+		time.Sleep(500 * time.Millisecond) // espera meio segundo antes de tentar de novo
 	}
+
 	if !running {
 		t.Errorf("❌ Esperava container rodando, mas não está")
 	} else {
@@ -68,7 +79,7 @@ func TestStopContainer(t *testing.T) {
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
 	t.Log("⬆️  Subindo container para teste de stop...")
-	if err := r.Up(composeFile); err != nil {
+	if err := r.Up("test_container", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	defer func() {
@@ -103,8 +114,8 @@ func TestCopyToContainer(t *testing.T) {
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
 	// Sobe o container nginx
-	t.Log("⬆️ Subindo container nginx para teste de copy...")
-	if err := r.Up(composeFile); err != nil {
+	t.Log("⬆️  Subindo container nginx para teste de copy...")
+	if err := r.Up("test_container", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	defer func() {
