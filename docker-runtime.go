@@ -211,8 +211,7 @@ func (r DockerRuntime) CreateVolume(volumeName string) error {
 	inspectCmd.Stderr = &stderr
 
 	if err := inspectCmd.Run(); err == nil {
-		// Já existe
-		return nil
+		return fmt.Errorf("volume já existe")
 	}
 
 	// Cria volume
@@ -232,8 +231,7 @@ func (r DockerRuntime) CreateNetwork(networkName string) error {
 	inspectCmd.Stderr = &stderr
 
 	if err := inspectCmd.Run(); err == nil {
-		// Já existe
-		return nil
+		return fmt.Errorf("network já existe")
 	}
 
 	// Cria network
