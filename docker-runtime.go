@@ -137,7 +137,7 @@ func (r DockerRuntime) ShowLogs(containerName string) error {
 }
 
 func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error {
-	args := []string{"run", "--rm"}
+	args := []string{"run"}
 
 	if runtime.GOOS != "windows" {
 		if uid != "" && uid != "0" {
@@ -156,7 +156,9 @@ func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, ot
 	}
 	args = append(args, otherOptionsList...)
 	args = append(args, image)
-	args = append(args, "bash", "-c", cmdStr)
+	if cmdStr != "" {
+		args = append(args, "bash", "-c", cmdStr)
+	}
 
 	if debug {
 		fmt.Printf("🔨 Comando docker: %s %s\n", r.config.dockerBinPath, strings.Join(args, " "))
@@ -180,6 +182,67 @@ func (r DockerRuntime) ExecInContainer(containerName string, cmdArgs []string) (
 	}
 
 	return stdout.Bytes(), nil
+}
+
+func (r DockerRuntime) GetContainerIP(containerName string) (string, error) {
+	cmd := r.buildDockerCmd(true, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("falha ao inspecionar container %s: %w. Stderr: %s", containerName, err, stderr.String())
+	}
+
+	ip := strings.TrimSpace(stdout.String())
+	if ip == "" {
+		return "", fmt.Errorf("não foi possível obter IP do container %s", containerName)
+	}
+
+	return ip, nil
+}
+
+func (r DockerRuntime) CreateVolume(volumeName string) error {
+	// Verifica se já existe
+	inspectCmd := r.buildDockerCmd(true, "volume", "inspect", volumeName)
+	var stdout, stderr bytes.Buffer
+	inspectCmd.Stdout = &stdout
+	inspectCmd.Stderr = &stderr
+
+	if err := inspectCmd.Run(); err == nil {
+		// Já existe
+		return nil
+	}
+
+	// Cria volume
+	createCmd := r.buildDockerCmd(false, "volume", "create", volumeName)
+	if err := createCmd.Run(); err != nil {
+		return fmt.Errorf("erro ao criar volume %s: %w", volumeName, err)
+	}
+
+	return nil
+}
+
+func (r DockerRuntime) CreateNetwork(networkName string) error {
+	// Verifica se já existe
+	inspectCmd := r.buildDockerCmd(true, "network", "inspect", networkName)
+	var stdout, stderr bytes.Buffer
+	inspectCmd.Stdout = &stdout
+	inspectCmd.Stderr = &stderr
+
+	if err := inspectCmd.Run(); err == nil {
+		// Já existe
+		return nil
+	}
+
+	// Cria network
+	createCmd := r.buildDockerCmd(false, "network", "create", networkName)
+	if err := createCmd.Run(); err != nil {
+		return fmt.Errorf("erro ao criar network %s: %w", networkName, err)
+	}
+
+	return nil
 }
 
 // -------------------- Auxiliares --------------------

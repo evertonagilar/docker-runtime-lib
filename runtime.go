@@ -23,6 +23,9 @@ type TContainerRuntime interface {
 	ShowLogs(containerName string) error
 	Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error
 	ExecInContainer(containerName string, cmd []string) ([]byte, error)
+	GetContainerIP(containerName string) (string, error)
+	CreateNetwork(networkName string) error
+	CreateVolume(volumeName string) error
 }
 
 // NewDockerRuntime cria uma instância de DockerRuntime local
