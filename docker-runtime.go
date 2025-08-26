@@ -83,6 +83,7 @@ func (r DockerRuntime) CopyToContainer(srcFileName, containerName, dstFileName s
 	srcFileName = filepath.ToSlash(srcFileName)
 
 	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", srcFileName, fmt.Sprintf("%s:%s", containerName, tmpDestPath))
+	fmt.Println(copyCmd.Args)
 	if err := copyCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao copiar para o container: %w", err)
 	}
@@ -203,15 +204,21 @@ func (r DockerRuntime) GetContainerIP(containerName string) (string, error) {
 	return ip, nil
 }
 
-func (r DockerRuntime) CreateVolume(volumeName string) error {
-	// Verifica se já existe
+func (r DockerRuntime) IsVolumeExist(volumeName string) bool {
 	inspectCmd := r.buildDockerCmd(true, "volume", "inspect", volumeName)
 	var stdout, stderr bytes.Buffer
 	inspectCmd.Stdout = &stdout
 	inspectCmd.Stderr = &stderr
 
 	if err := inspectCmd.Run(); err == nil {
-		return fmt.Errorf("volume já existe")
+		return true
+	}
+	return false
+}
+
+func (r DockerRuntime) CreateVolume(volumeName string) error {
+	if r.IsVolumeExist(volumeName) {
+		return nil
 	}
 
 	// Cria volume

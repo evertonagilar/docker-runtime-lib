@@ -26,6 +26,7 @@ type TContainerRuntime interface {
 	GetContainerIP(containerName string) (string, error)
 	CreateNetwork(networkName string) error
 	CreateVolume(volumeName string) error
+	IsVolumeExist(volumeName string) bool
 }
 
 // NewDockerRuntime cria uma instância de DockerRuntime local
