@@ -229,21 +229,38 @@ func (r DockerRuntime) CreateVolume(volumeName string) error {
 	return nil
 }
 
-func (r DockerRuntime) CreateNetwork(networkName string) error {
-	// Verifica se já existe
-	inspectCmd := r.buildDockerCmd(true, "network", "inspect", networkName)
-	var stdout, stderr bytes.Buffer
-	inspectCmd.Stdout = &stdout
-	inspectCmd.Stderr = &stderr
+// IsNetworkExist verifica se a rede Docker já existe
+func (r DockerRuntime) IsNetworkExist(networkName string) bool {
+	cmd := r.buildDockerCmd(true, "network", "inspect", networkName)
+	if err := cmd.Run(); err == nil {
+		return true
+	}
+	return false
+}
 
-	if err := inspectCmd.Run(); err == nil {
-		return fmt.Errorf("network já existe")
+// CreateNetwork cria uma rede Docker com subnet, ipRange e label opcionais
+func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, label string) error {
+	if r.IsNetworkExist(networkName) {
+		return nil
 	}
 
-	// Cria network
-	createCmd := r.buildDockerCmd(false, "network", "create", networkName)
+	args := []string{"network", "create"}
+
+	if subnet != "" {
+		args = append(args, "--subnet="+subnet)
+	}
+	if ipRange != "" {
+		args = append(args, "--ip-range="+ipRange)
+	}
+	if label != "" {
+		args = append(args, "--label="+label)
+	}
+
+	args = append(args, networkName)
+
+	createCmd := r.buildDockerCmd(false, args...)
 	if err := createCmd.Run(); err != nil {
-		return fmt.Errorf("erro ao criar network %s: %w", networkName, err)
+		return fmt.Errorf("erro ao criar rede %s: %w", networkName, err)
 	}
 
 	return nil
