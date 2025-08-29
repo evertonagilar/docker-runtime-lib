@@ -83,7 +83,6 @@ func (r DockerRuntime) CopyToContainer(srcFileName, containerName, dstFileName s
 	srcFileName = filepath.ToSlash(srcFileName)
 
 	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", srcFileName, fmt.Sprintf("%s:%s", containerName, tmpDestPath))
-	fmt.Println(copyCmd.Args)
 	if err := copyCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao copiar para o container: %w", err)
 	}
