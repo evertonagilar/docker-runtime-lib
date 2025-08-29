@@ -238,8 +238,7 @@ func (r DockerRuntime) IsNetworkExist(networkName string) bool {
 	return false
 }
 
-// CreateNetwork cria uma rede Docker com subnet, ipRange e label opcionais
-func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, label string) error {
+func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, gateway, label string) error {
 	if r.IsNetworkExist(networkName) {
 		return nil
 	}
@@ -251,6 +250,9 @@ func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, label string)
 	}
 	if ipRange != "" {
 		args = append(args, "--ip-range="+ipRange)
+	}
+	if gateway != "" {
+		args = append(args, "--gateway="+gateway)
 	}
 	if label != "" {
 		args = append(args, "--label="+label)
