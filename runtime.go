@@ -16,7 +16,6 @@ type TDockerConfig struct {
 type TContainerRuntime interface {
 	Up(containerName, composeFile string, WaitContainerRunning bool) error
 	Down(containerName string) error
-	CopyToContainer(srcPath, containerName, destPath string) error
 	IsContainerRunning(containerName string) (bool, error)
 	WaitContainerRunning(containerName string, timeout time.Duration) error
 	StopContainer(containerName string) error
@@ -28,6 +27,9 @@ type TContainerRuntime interface {
 	CreateVolume(volumeName string) error
 	IsVolumeExist(volumeName string) bool
 	IsNetworkExist(networkName string) bool
+	CopyToContainer(srcPath, containerName, destPath string) error
+	CopyToHost(src, containerName, dst string) error
+	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, containerName string) (bool, error)
 }
 
 // NewDockerRuntime cria uma instância de DockerRuntime local

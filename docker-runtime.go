@@ -62,6 +62,38 @@ func (r DockerRuntime) Up(containerName, composeFile string, WaitContainerRunnin
 	return nil
 }
 
+func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error {
+	args := []string{"run"}
+
+	if runtime.GOOS != "windows" {
+		if uid != "" && uid != "0" {
+			args = append(args, "-e", "HOST_UID="+uid)
+		}
+		if gid != "" && gid != "0" {
+			args = append(args, "-e", "HOST_GID="+gid)
+		}
+	}
+
+	for _, v := range volumeList {
+		args = append(args, "-v", v)
+	}
+	if chDir != "" {
+		args = append(args, "-w", chDir)
+	}
+	args = append(args, otherOptionsList...)
+	args = append(args, image)
+	if cmdStr != "" {
+		args = append(args, "bash", "-c", cmdStr)
+	}
+
+	if debug {
+		fmt.Printf("🔨 Comando docker: %s %s\n", r.config.dockerBinPath, strings.Join(args, " "))
+	}
+
+	cmd := r.buildDockerCmd(false, args...)
+	return cmd.Run()
+}
+
 func (r DockerRuntime) Down(containerName string) error {
 	stopCmd := r.buildDockerCmd(false, "stop", containerName)
 	if err := stopCmd.Run(); err != nil {
@@ -93,6 +125,35 @@ func (r DockerRuntime) CopyToContainer(srcFileName, containerName, dstFileName s
 	}
 
 	return nil
+}
+
+func (r DockerRuntime) CopyToHost(src, containerName, dst string) error {
+	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", fmt.Sprintf("%s:%s", containerName, src), dst)
+	if err := copyCmd.Run(); err != nil {
+		return fmt.Errorf("erro ao copiar para o container: %w", err)
+	}
+
+	return nil
+}
+
+func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, containerName string) (bool, error) {
+	timeoutChan := time.After(timeout)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	fmt.Println("entra loop teste...")
+	for {
+		select {
+		case <-timeoutChan:
+			return false, fmt.Errorf("timeout esperando arquivo %s aparecer no container %s", fileName, containerName)
+		case <-ticker.C:
+			fmt.Println("teste...")
+			// testa a existência do arquivo com [ -f ]
+			_, err := r.ExecInContainer(containerName, []string{"test", "-f", fileName})
+			if err == nil {
+				return true, nil
+			}
+		}
+	}
 }
 
 func (r DockerRuntime) IsContainerRunning(containerName string) (bool, error) {
@@ -133,38 +194,6 @@ func (r DockerRuntime) StopContainer(containerName string) error {
 
 func (r DockerRuntime) ShowLogs(containerName string) error {
 	cmd := r.buildDockerCmd(false, "logs", "-f", containerName)
-	return cmd.Run()
-}
-
-func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error {
-	args := []string{"run"}
-
-	if runtime.GOOS != "windows" {
-		if uid != "" && uid != "0" {
-			args = append(args, "-e", "HOST_UID="+uid)
-		}
-		if gid != "" && gid != "0" {
-			args = append(args, "-e", "HOST_GID="+gid)
-		}
-	}
-
-	for _, v := range volumeList {
-		args = append(args, "-v", v)
-	}
-	if chDir != "" {
-		args = append(args, "-w", chDir)
-	}
-	args = append(args, otherOptionsList...)
-	args = append(args, image)
-	if cmdStr != "" {
-		args = append(args, "bash", "-c", cmdStr)
-	}
-
-	if debug {
-		fmt.Printf("🔨 Comando docker: %s %s\n", r.config.dockerBinPath, strings.Join(args, " "))
-	}
-
-	cmd := r.buildDockerCmd(false, args...)
 	return cmd.Run()
 }
 
