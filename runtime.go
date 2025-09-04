@@ -1,9 +1,12 @@
 package container
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
+
+var ErrContainerNotFound = errors.New("container não encontrado")
 
 type TDockerConfig struct {
 	RemoteHost    string

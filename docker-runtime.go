@@ -95,14 +95,9 @@ func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, ot
 }
 
 func (r DockerRuntime) Down(containerName string) error {
-	stopCmd := r.buildDockerCmd(false, "stop", containerName)
+	stopCmd := r.buildDockerCmd(false, "rm", "--force", containerName)
 	if err := stopCmd.Run(); err != nil {
 		return fmt.Errorf("falha ao parar container: %w", err)
-	}
-
-	rmCmd := r.buildDockerCmd(false, "rm", containerName)
-	if err := rmCmd.Run(); err != nil {
-		return fmt.Errorf("falha ao remover container: %w", err)
 	}
 
 	return nil
@@ -140,17 +135,19 @@ func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, inter
 	timeoutChan := time.After(timeout)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	fmt.Println("entra loop teste...")
 	for {
 		select {
 		case <-timeoutChan:
 			return false, fmt.Errorf("timeout esperando arquivo %s aparecer no container %s", fileName, containerName)
 		case <-ticker.C:
-			fmt.Println("teste...")
-			// testa a existência do arquivo com [ -f ]
-			_, err := r.ExecInContainer(containerName, []string{"test", "-f", fileName})
-			if err == nil {
-				return true, nil
+			running, _ := r.IsContainerRunning(containerName)
+			if running {
+				_, err := r.ExecInContainer(containerName, []string{"test", "-f", fileName})
+				if err == nil {
+					return true, nil
+				}
+			} else {
+				return false, ErrContainerNotFound
 			}
 		}
 	}
@@ -209,7 +206,6 @@ func (r DockerRuntime) ExecInContainer(containerName string, cmdArgs []string) (
 	if err != nil {
 		return nil, fmt.Errorf("erro ao executar comando no container: %w. Stderr: %s", err, stderr.String())
 	}
-
 	return stdout.Bytes(), nil
 }
 
