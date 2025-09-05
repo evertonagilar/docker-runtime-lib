@@ -83,7 +83,7 @@ func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, ot
 	args = append(args, otherOptionsList...)
 	args = append(args, image)
 	if cmdStr != "" {
-		args = append(args, "bash", "-c", cmdStr)
+		args = append(args, "/usr/bin/bash", "-c", cmdStr)
 	}
 
 	if debug {
@@ -142,7 +142,7 @@ func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, inter
 		case <-ticker.C:
 			running, _ := r.IsContainerRunning(containerName)
 			if running {
-				_, err := r.ExecInContainer(containerName, []string{"test", "-f", fileName})
+				_, err := r.ExecInContainer(containerName, []string{"/usr/bin/test", "-f", fileName})
 				if err == nil {
 					return true, nil
 				}
