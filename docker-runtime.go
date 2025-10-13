@@ -13,7 +13,22 @@ import (
 )
 
 type DockerRuntime struct {
-	config TDockerConfig
+	config TContainerRuntimeConfig
+}
+
+func NewDockerRuntimeFactory(config TContainerRuntimeConfig) (TContainerRuntime, error) {
+	dockerBinPath, err := getDockerBinPath()
+	if err != nil {
+		return nil, err
+	}
+	config.commandBinPath = dockerBinPath
+
+	// Valida os caminhos TLS
+	if err := validateTLSPaths(config); err != nil {
+		return nil, err
+	}
+
+	return DockerRuntime{config: config}, nil
 }
 
 func (r DockerRuntime) buildDockerArgs(args ...string) []string {
@@ -39,7 +54,7 @@ func (r DockerRuntime) buildDockerArgs(args ...string) []string {
 
 // buildDockerCmd cria *exec.Cmd com opção de capturar saída
 func (r DockerRuntime) buildDockerCmd(captureOutput bool, args ...string) *exec.Cmd {
-	cmd := exec.Command(r.config.dockerBinPath, r.buildDockerArgs(args...)...)
+	cmd := exec.Command(r.config.commandBinPath, r.buildDockerArgs(args...)...)
 	if !captureOutput {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -87,7 +102,7 @@ func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, ot
 	}
 
 	if debug {
-		fmt.Printf("🔨 Comando docker: %s %s\n", r.config.dockerBinPath, strings.Join(args, " "))
+		fmt.Printf("🔨 Comando docker: %s %s\n", r.config.commandBinPath, strings.Join(args, " "))
 	}
 
 	cmd := r.buildDockerCmd(false, args...)
@@ -154,7 +169,7 @@ func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, inter
 }
 
 func (r DockerRuntime) IsContainerRunning(containerName string) (bool, error) {
-	cmd := exec.Command(r.config.dockerBinPath, r.buildDockerArgs("inspect", "-f", "{{.State.Running}}", containerName)...)
+	cmd := exec.Command(r.config.commandBinPath, r.buildDockerArgs("inspect", "-f", "{{.State.Running}}", containerName)...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -303,7 +318,7 @@ func getDockerBinPath() (string, error) {
 	return path, nil
 }
 
-func validateTLSPaths(cfg TDockerConfig) error {
+func validateTLSPaths(cfg TContainerRuntimeConfig) error {
 	paths := map[string]string{
 		"TLS CA Cert": cfg.TLSCaCertPath,
 		"TLS Cert":    cfg.TLSCertPath,

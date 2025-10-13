@@ -2,18 +2,26 @@ package container
 
 import (
 	"errors"
-	"fmt"
 	"time"
 )
 
 var ErrContainerNotFound = errors.New("container não encontrado")
 
-type TDockerConfig struct {
-	RemoteHost    string
-	TLSCaCertPath string
-	TLSCertPath   string
-	TLSKeyPath    string
-	dockerBinPath string
+type TContainerRuntimeConfig struct {
+	Image          string
+	ContainerName  string
+	Env            []string
+	Volumes        []string
+	Ports          map[string]string // ex: {"8080/tcp": "8080", "8787/tcp": "8787"}
+	NetworkName    string
+	RemoteHost     string
+	TLSCaCertPath  string
+	TLSCertPath    string
+	TLSKeyPath     string
+	MemoryLimitMB  int
+	CpuLimit       float64
+	commandBinPath string
+	Workspace      string
 }
 
 type TContainerRuntime interface {
@@ -35,24 +43,10 @@ type TContainerRuntime interface {
 	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, containerName string) (bool, error)
 }
 
-// NewDockerRuntime cria uma instância de DockerRuntime local
-func NewDockerRuntime() (TContainerRuntime, error) {
-	dockerConfig := TDockerConfig{}
-	return NewDockerRuntimeCustom(dockerConfig)
+func NewDockerRuntime(config TContainerRuntimeConfig) (TContainerRuntime, error) {
+	return NewDockerRuntimeFactory(config)
 }
 
-// NewDockerRuntimeCustom cria uma instância de DockerRuntime com conexão TLS e valida se o Docker está presente.
-func NewDockerRuntimeCustom(dockerConfig TDockerConfig) (TContainerRuntime, error) {
-	dockerBinPath, err := getDockerBinPath()
-	if err != nil {
-		return nil, fmt.Errorf("Docker não encontrado: %w", err)
-	}
-	dockerConfig.dockerBinPath = dockerBinPath
-
-	// Valida os caminhos TLS
-	if err := validateTLSPaths(dockerConfig); err != nil {
-		return nil, err
-	}
-
-	return DockerRuntime{config: dockerConfig}, nil
+func NewKubernetesRuntime(config TContainerRuntimeConfig) (TContainerRuntime, error) {
+	return NewKubernetesRuntimeFactory(config)
 }
