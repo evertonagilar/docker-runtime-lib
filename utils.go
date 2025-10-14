@@ -2,7 +2,7 @@ package container
 
 import "fmt"
 
-func quoteList(list []string) []string {
+func QuoteList(list []string) []string {
 	quoted := make([]string, len(list))
 	for i, s := range list {
 		quoted[i] = fmt.Sprintf("%q", s)

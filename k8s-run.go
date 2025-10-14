@@ -13,7 +13,7 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	ctx := context.Background()
 
 	// 🔍 Valores padrão
-	podName := "cpdctl-run"
+	podName := "main"
 	namespace := "default"
 
 	// 🔍 Extrai o nome do pod de otherOptionsList, ex: "--name=cpdctl-build"
@@ -36,7 +36,7 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	}
 
 	// 🧩 Gera o manifesto
-	manifest, err := generateManifest(podName, namespace, image, command, args, envs, volumeList)
+	manifest, err := generateManifest(podName, namespace, image, command, args, envs, volumeList, chDir)
 	if err != nil {
 		return fmt.Errorf("erro ao gerar manifesto: %w", err)
 	}
@@ -64,7 +64,7 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	return nil
 }
 
-func generateManifest(podName, namespace, image string, command, args []string, envs map[string]string, volumeList []string) (string, error) {
+func generateManifest(podName, namespace, image string, command, args []string, envs map[string]string, volumeList []string, chDir string) (string, error) {
 	type Volume struct {
 		Name      string
 		HostPath  string
@@ -125,16 +125,17 @@ spec:
   containers:
   - name: main
     image: %s
-    command: [%s]
-    args: [%s]
+    workingDir: %s
+    command: [%s, %s]
     env:%s
     volumeMounts:%s
   volumes:%s`,
 		podName,
 		namespace,
 		image,
-		strings.Join(quoteList(command), ", "),
-		strings.Join(quoteList(args), ", "),
+		chDir,
+		strings.Join(QuoteList(command), ", "),
+		strings.Join(QuoteList(args), ", "),
 		envYAML.String(),
 		volumeMountsYAML.String(),
 		volumesYAML.String(),

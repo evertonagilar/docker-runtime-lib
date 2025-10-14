@@ -1,3 +1,3 @@
-module github.com/evertonagilar/docker-runtime-lib
+module docker-runtime-lib
 
 go 1.24.6

@@ -3,6 +3,7 @@ package container
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,7 @@ func NewKubernetesRuntimeFactory(config TContainerRuntimeConfig) (TContainerRunt
 	if err != nil {
 		return nil, err
 	}
-	config.commandBinPath = kubectlBinPath
+	config.CommandBinPath = kubectlBinPath
 
 	return KubernetesRuntime{config: config}, nil
 }
@@ -44,7 +45,7 @@ func (r KubernetesRuntime) buildKubectlArgs(args ...string) []string {
 }
 
 func (r KubernetesRuntime) buildKubectlCmd(captureOutput bool, args ...string) *exec.Cmd {
-	cmd := exec.Command(r.config.commandBinPath, r.buildKubectlArgs(args...)...)
+	cmd := exec.Command(r.config.CommandBinPath, r.buildKubectlArgs(args...)...)
 	if !captureOutput {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -79,34 +80,57 @@ func (r KubernetesRuntime) Down(containerName string) error {
 }
 
 func (r KubernetesRuntime) IsContainerRunning(containerName string) (bool, error) {
-	cmd := r.buildKubectlCmd(true, "get", "pod", containerName, "-o", "jsonpath={.status.phase}")
-
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var err error
 
-	err := cmd.Run()
-	if err != nil {
-		return false, nil
+	for attempt := 1; attempt <= 2; attempt++ {
+		cmd := r.buildKubectlCmd(true, "get", "pod", containerName, "-o", "jsonpath={.status.phase}")
+		stdout.Reset()
+		stderr.Reset()
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err = cmd.Run()
+		if err == nil {
+			status := strings.TrimSpace(stdout.String())
+			return status == "Running", nil
+		}
+
+		// Se falhou na primeira tentativa, aguarda e tenta novamente
+		if attempt == 1 {
+			fmt.Printf("⚠️  Falha ao verificar pod '%s' (tentativa 1): %v\n", containerName, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
 	}
 
-	status := strings.TrimSpace(stdout.String())
-	return status == "Running", nil
+	// Se chegou aqui, tentou 2x sem sucesso
+	return false, nil
 }
 
 func (r KubernetesRuntime) WaitContainerRunning(containerName string, timeout time.Duration) error {
-	timeoutChan := time.After(timeout)
-	tick := time.Tick(2 * time.Second)
+	const interval = 2 * time.Second
+	start := time.Now()
+	time.Sleep(interval)
 	for {
-		select {
-		case <-timeoutChan:
-			return fmt.Errorf("timeout esperando pod %s ficar Running", containerName)
-		case <-tick:
-			running, _ := r.IsContainerRunning(containerName)
-			if running {
+		running, _ := r.IsContainerRunning(containerName)
+		if running {
+			cmd := r.buildKubectlCmd(true, "get", "pod", containerName, "-o", "jsonpath={.status.containerStatuses[0].ready}")
+			var stdout bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stdout
+			_ = cmd.Run()
+
+			if strings.TrimSpace(stdout.String()) == "true" {
+				fmt.Printf("✅ Pod '%s' está em execução.\n", containerName)
 				return nil
 			}
 		}
+
+		if time.Since(start) > timeout {
+			return fmt.Errorf("timeout aguardando pod '%s' ficar pronto", containerName)
+		}
+		time.Sleep(interval)
 	}
 }
 
@@ -158,18 +182,42 @@ func (r KubernetesRuntime) GetContainerIP(containerName string) (string, error) 
 
 func (r KubernetesRuntime) CopyToContainer(srcPath, containerName, destPath string) error {
 	srcPath = filepath.ToSlash(srcPath)
-	cmd := r.buildKubectlCmd(false, "cp", srcPath, fmt.Sprintf("%s:%s", containerName, destPath))
-	if err := cmd.Run(); err != nil {
+	fullCmd := []string{"cp", srcPath, fmt.Sprintf("%s:%s", containerName, destPath)}
+
+	fmt.Printf("📤 Executando kubectl %s\n", strings.Join(fullCmd, " "))
+
+	cmd := r.buildKubectlCmd(false, fullCmd...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	start := time.Now()
+	err := cmd.Run()
+	elapsed := time.Since(start)
+
+	if err != nil {
+		fmt.Printf("❌ Erro ao executar kubectl cp (%.2fs): %v\n", elapsed.Seconds(), err)
 		return fmt.Errorf("erro ao copiar arquivo para o pod: %w", err)
 	}
+
+	fmt.Printf("✅ Cópia concluída em %.2fs\n", elapsed.Seconds())
 	return nil
 }
 
 func (r KubernetesRuntime) CopyToHost(src, containerName, dst string) error {
 	cmd := r.buildKubectlCmd(false, "cp", fmt.Sprintf("%s:%s", containerName, src), dst)
+
+	// Cria buffers separados para stdout e stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	// Redireciona stderr, mas filtra apenas o warning do tar
+	cmd.Stderr = io.Discard // descarta tudo de stderr, incluindo o tar warning
+
+	fmt.Printf("📋 Comando kubectl que será executado: %s\n", strings.Join(cmd.Args, " "))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao copiar arquivo do pod: %w", err)
 	}
+
 	return nil
 }
 

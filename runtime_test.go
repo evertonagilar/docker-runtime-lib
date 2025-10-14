@@ -9,7 +9,8 @@ import (
 
 // Função auxiliar para criar runtime ou pular teste
 func getRuntimeOrSkip(t *testing.T) TContainerRuntime {
-	runtime, err := NewDockerRuntime()
+	var config TContainerRuntimeConfig = TContainerRuntimeConfig{}
+	runtime, err := NewDockerRuntime(config)
 	if err != nil {
 		t.Skipf("Docker não disponível, pulando teste: %v", err)
 	}

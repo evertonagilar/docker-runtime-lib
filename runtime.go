@@ -20,7 +20,7 @@ type TContainerRuntimeConfig struct {
 	TLSKeyPath     string
 	MemoryLimitMB  int
 	CpuLimit       float64
-	commandBinPath string
+	CommandBinPath string
 	Workspace      string
 }
 
