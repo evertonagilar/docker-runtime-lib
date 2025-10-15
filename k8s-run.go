@@ -52,10 +52,10 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if debug {
-		fmt.Printf("📦 Aplicando manifesto gerado: %s\n", tmpFile)
-		fmt.Printf("%s\n", manifest)
-	}
+	// if debug {
+	// 	fmt.Printf("📦 Aplicando manifesto gerado: %s\n", tmpFile)
+	// 	fmt.Printf("%s\n", manifest)
+	// }
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
@@ -120,8 +120,11 @@ kind: Pod
 metadata:
   name: %s
   namespace: %s
+  labels:
+    %s
 spec:
   restartPolicy: Never
+  terminationGracePeriodSeconds: 0   
   containers:
   - name: main
     image: %s
@@ -132,6 +135,7 @@ spec:
   volumes:%s`,
 		podName,
 		namespace,
+		podName,
 		image,
 		chDir,
 		strings.Join(QuoteList(command), ", "),
