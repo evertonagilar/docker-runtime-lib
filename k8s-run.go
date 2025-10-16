@@ -16,12 +16,15 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	podName := "main"
 	namespace := "default"
 
-	// 🔍 Extrai o nome do pod de otherOptionsList, ex: "--name=cpdctl-build"
+	// 🔍 Extrai informações complementares
 	for _, opt := range otherOptionsList {
 		if strings.HasPrefix(opt, "--name=") {
 			podName = strings.TrimPrefix(opt, "--name=")
-			break
+		} else if strings.HasPrefix(opt, "--namespace=") {
+			namespace = strings.TrimPrefix(opt, "--namespace=")
+			fmt.Println("namespace eh ", namespace)
 		}
+
 	}
 
 	command := []string{"/bin/bash", "-c"}
@@ -35,19 +38,19 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 		envs["DEBUG"] = "true"
 	}
 
-	// 🧩 Gera o manifesto
+	// Gera o manifesto
 	manifest, err := generateManifest(podName, namespace, image, command, args, envs, volumeList, chDir)
 	if err != nil {
 		return fmt.Errorf("erro ao gerar manifesto: %w", err)
 	}
 
-	// 💾 Salva o manifesto temporário
+	// Salva o manifesto temporário
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s.yaml", podName))
 	if err := os.WriteFile(tmpFile, []byte(manifest), 0644); err != nil {
 		return fmt.Errorf("erro ao salvar manifesto: %w", err)
 	}
 
-	// 🚀 Aplica o manifesto
+	// Aplica o manifesto
 	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", tmpFile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -115,13 +118,19 @@ func generateManifest(podName, namespace, image string, command, args []string, 
       type: DirectoryOrCreate`, vol.Name, vol.HostPath))
 	}
 
-	manifest := fmt.Sprintf(`apiVersion: v1
+	manifest := fmt.Sprintf(`
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+---
+apiVersion: v1
 kind: Pod
 metadata:
   name: %s
   namespace: %s
   labels:
-    %s
+    app: %s
 spec:
   restartPolicy: Never
   terminationGracePeriodSeconds: 0   
@@ -133,6 +142,7 @@ spec:
     env:%s
     volumeMounts:%s
   volumes:%s`,
+		namespace,
 		podName,
 		namespace,
 		podName,
