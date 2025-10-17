@@ -33,7 +33,7 @@ type TContainerRuntime interface {
 	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
 	StopContainer(podOrContainerName, namespace string) error
 	ShowLogs(podOrContainerName, namespace string) error
-	Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error
+	Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error
 	ExecInContainer(podOrContainerName, namespace string, cmd []string) ([]byte, error)
 	GetContainerIP(podOrContainerName, namespace string) (string, error)
 	CreateNetwork(networkName, subnet, ipRange, gateway, label string) error

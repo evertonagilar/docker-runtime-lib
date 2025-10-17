@@ -10,7 +10,7 @@ import (
 	"text/template"
 )
 
-func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
+func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
 	ctx := context.Background()
 
 	defaultNamespace := namespace
@@ -25,7 +25,10 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	runCfg := extractRunSettings(defaultNamespace, defaultPod, otherOptionsList)
 	envs := buildEnvMap(uid, gid, r.config.Debug)
 
-	commandSequence := []string{"/bin/bash", "-c", cmdStr}
+	if entrypoint == "" {
+		entrypoint = "/bin/bash"
+	}
+	commandSequence := []string{entrypoint, "-c", cmdStr}
 
 	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumeList)
 	if err != nil {

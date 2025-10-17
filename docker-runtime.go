@@ -77,7 +77,7 @@ func (r DockerRuntime) Up(podOrContainerName, namespace, composeFile string, wai
 	return nil
 }
 
-func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
+func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
 	_ = namespace
 	args := []string{"run"}
 
@@ -102,7 +102,10 @@ func (r DockerRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, ot
 	args = append(args, otherOptionsList...)
 	args = append(args, image)
 	if cmdStr != "" {
-		args = append(args, "/usr/bin/bash", "-c", cmdStr)
+		if entrypoint == "" {
+			entrypoint = "/usr/bin/bash"
+		}
+		args = append(args, entrypoint, "-c", cmdStr)
 	}
 
 	if r.config.Debug {
