@@ -10,13 +10,22 @@ import (
 	"text/template"
 )
 
-func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error {
+func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
 	ctx := context.Background()
 
-	runCfg := extractRunSettings(otherOptionsList)
-	envs := buildEnvMap(uid, gid, debug)
+	defaultNamespace := namespace
+	if defaultNamespace == "" {
+		defaultNamespace = r.config.Namespace
+	}
+	defaultPod := podOrContainerName
+	if defaultPod == "" {
+		defaultPod = r.config.ContainerName
+	}
 
-	commandSequence := append([]string{"/bin/bash", "-c"}, cmdStr)
+	runCfg := extractRunSettings(defaultNamespace, defaultPod, otherOptionsList)
+	envs := buildEnvMap(uid, gid, r.config.Debug)
+
+	commandSequence := []string{"/bin/bash", "-c", cmdStr}
 
 	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumeList)
 	if err != nil {
@@ -37,8 +46,8 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 		return fmt.Errorf("erro ao fechar manifesto temporário: %w", err)
 	}
 
-	kubectlArgs := []string{"apply", "-f", tmpFile.Name()}
-	if debug {
+	kubectlArgs := addNamespaceArg(runCfg.Namespace, []string{"apply", "-f", tmpFile.Name()})
+	if r.config.Debug {
 		fmt.Printf("🔨 Comando kubectl: %s %s\n", r.config.CommandBinPath, strings.Join(r.buildKubectlArgs(kubectlArgs...), " "))
 	}
 
@@ -50,12 +59,12 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	return nil
 }
 
-func buildEnvMap(uid, gid string, debug bool) map[string]string {
+func buildEnvMap(uid, gid string, debugEnabled bool) map[string]string {
 	envs := map[string]string{
 		"UID": uid,
 		"GID": gid,
 	}
-	if debug {
+	if debugEnabled {
 		envs["DEBUG"] = "true"
 	}
 	return envs
@@ -66,10 +75,17 @@ type runSettings struct {
 	Namespace string
 }
 
-func extractRunSettings(options []string) runSettings {
+func extractRunSettings(defaultNamespace, defaultPod string, options []string) runSettings {
+	if defaultPod == "" {
+		defaultPod = "main"
+	}
+	if defaultNamespace == "" {
+		defaultNamespace = "default"
+	}
+
 	cfg := runSettings{
-		PodName:   "main",
-		Namespace: "default",
+		PodName:   defaultPod,
+		Namespace: defaultNamespace,
 	}
 
 	for _, opt := range options {
