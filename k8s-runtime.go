@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -46,7 +47,11 @@ func (r KubernetesRuntime) buildKubectlArgs(args ...string) []string {
 }
 
 func (r KubernetesRuntime) buildKubectlCmd(captureOutput bool, args ...string) *exec.Cmd {
-	cmd := exec.Command(r.config.CommandBinPath, r.buildKubectlArgs(args...)...)
+	return r.buildKubectlCmdWithContext(context.Background(), captureOutput, args...)
+}
+
+func (r KubernetesRuntime) buildKubectlCmdWithContext(ctx context.Context, captureOutput bool, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, r.config.CommandBinPath, r.buildKubectlArgs(args...)...)
 	if !captureOutput {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

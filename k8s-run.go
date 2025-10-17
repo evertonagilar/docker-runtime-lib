@@ -4,62 +4,45 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"text/template"
 )
 
 func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error {
 	ctx := context.Background()
 
-	// 🔍 Valores padrão
-	podName := "main"
-	namespace := "default"
+	runCfg := extractRunSettings(otherOptionsList)
+	envs := buildEnvMap(uid, gid, debug)
 
-	// 🔍 Extrai informações complementares
-	for _, opt := range otherOptionsList {
-		if strings.HasPrefix(opt, "--name=") {
-			podName = strings.TrimPrefix(opt, "--name=")
-		} else if strings.HasPrefix(opt, "--namespace=") {
-			namespace = strings.TrimPrefix(opt, "--namespace=")
-			fmt.Println("namespace eh ", namespace)
-		}
+	commandSequence := append([]string{"/bin/bash", "-c"}, cmdStr)
 
-	}
-
-	command := []string{"/bin/bash", "-c"}
-	args := []string{cmdStr}
-
-	envs := map[string]string{
-		"UID": uid,
-		"GID": gid,
-	}
-	if debug {
-		envs["DEBUG"] = "true"
-	}
-
-	// Gera o manifesto
-	manifest, err := generateManifest(podName, namespace, image, command, args, envs, volumeList, chDir)
+	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumeList)
 	if err != nil {
 		return fmt.Errorf("erro ao gerar manifesto: %w", err)
 	}
 
-	// Salva o manifesto temporário
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s.yaml", podName))
-	if err := os.WriteFile(tmpFile, []byte(manifest), 0644); err != nil {
-		return fmt.Errorf("erro ao salvar manifesto: %w", err)
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s-*.yaml", runCfg.PodName))
+	if err != nil {
+		return fmt.Errorf("erro ao criar arquivo temporário para manifesto: %w", err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	if _, err := tmpFile.Write(manifest); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("erro ao escrever manifesto temporário: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("erro ao fechar manifesto temporário: %w", err)
 	}
 
-	// Aplica o manifesto
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", tmpFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	kubectlArgs := []string{"apply", "-f", tmpFile.Name()}
+	if debug {
+		fmt.Printf("🔨 Comando kubectl: %s %s\n", r.config.CommandBinPath, strings.Join(r.buildKubectlArgs(kubectlArgs...), " "))
+	}
 
-	// if debug {
-	// 	fmt.Printf("📦 Aplicando manifesto gerado: %s\n", tmpFile)
-	// 	fmt.Printf("%s\n", manifest)
-	// }
-
+	cmd := r.buildKubectlCmdWithContext(ctx, false, kubectlArgs...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
 	}
@@ -67,93 +50,177 @@ func (r KubernetesRuntime) Run(cmdStr, chDir, image, uid, gid string, volumeList
 	return nil
 }
 
-func generateManifest(podName, namespace, image string, command, args []string, envs map[string]string, volumeList []string, chDir string) (string, error) {
-	type Volume struct {
-		Name      string
-		HostPath  string
-		MountPath string
-		MountMode string
+func buildEnvMap(uid, gid string, debug bool) map[string]string {
+	envs := map[string]string{
+		"UID": uid,
+		"GID": gid,
+	}
+	if debug {
+		envs["DEBUG"] = "true"
+	}
+	return envs
+}
+
+type runSettings struct {
+	PodName   string
+	Namespace string
+}
+
+func extractRunSettings(options []string) runSettings {
+	cfg := runSettings{
+		PodName:   "main",
+		Namespace: "default",
 	}
 
-	var volumes []Volume
+	for _, opt := range options {
+		switch {
+		case strings.HasPrefix(opt, "--name="):
+			cfg.PodName = strings.TrimPrefix(opt, "--name=")
+		case strings.HasPrefix(opt, "--namespace="):
+			cfg.Namespace = strings.TrimPrefix(opt, "--namespace=")
+		}
+	}
 
-	for i, v := range volumeList {
-		// formato esperado: <hostPath>:<mountPath>:<mode>
-		parts := strings.Split(v, ":")
+	return cfg
+}
+
+func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumeList []string) ([]byte, error) {
+	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumeList)
+	if err != nil {
+		return nil, err
+	}
+
+	tpl, err := template.New("manifest").Funcs(template.FuncMap{
+		"formatList": formatList,
+	}).Parse(kubernetesManifestTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao preparar template do manifesto: %w", err)
+	}
+
+	var builder strings.Builder
+	if err := tpl.Execute(&builder, data); err != nil {
+		return nil, fmt.Errorf("erro ao renderizar template do manifesto: %w", err)
+	}
+
+	return []byte(builder.String()), nil
+}
+
+type manifestData struct {
+	Namespace  string
+	PodName    string
+	Image      string
+	WorkingDir string
+	Command    []string
+	Env        []envEntry
+	Volumes    []volumeEntry
+}
+
+type envEntry struct {
+	Name  string
+	Value string
+}
+
+type volumeEntry struct {
+	Name      string
+	MountPath string
+	HostPath  string
+	ReadOnly  bool
+}
+
+func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumeList []string) (manifestData, error) {
+	envEntries := make([]envEntry, 0, len(envs))
+	keys := make([]string, 0, len(envs))
+	for k := range envs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		envEntries = append(envEntries, envEntry{Name: k, Value: envs[k]})
+	}
+
+	volumes := make([]volumeEntry, 0, len(volumeList))
+	for idx, rawVolume := range volumeList {
+		parts := strings.Split(rawVolume, ":")
 		if len(parts) < 2 {
-			return "", fmt.Errorf("volume inválido: %s (esperado formato hostPath:mountPath[:mode])", v)
+			return manifestData{}, fmt.Errorf("volume inválido: %s (esperado formato hostPath:mountPath[:mode])", rawVolume)
 		}
-		vol := Volume{
-			Name:      fmt.Sprintf("vol-%d", i),
-			HostPath:  filepath.Join("/sigctl", parts[0]),
+
+		mode := "rw"
+		if len(parts) >= 3 && parts[2] != "" {
+			mode = parts[2]
+		}
+
+		volumes = append(volumes, volumeEntry{
+			Name:      fmt.Sprintf("vol-%d", idx),
 			MountPath: parts[1],
-			MountMode: "rw",
-		}
-		if len(parts) == 3 {
-			vol.MountMode = parts[2]
-		}
-		volumes = append(volumes, vol)
+			HostPath:  filepath.Join("/sigctl", parts[0]),
+			ReadOnly:  strings.EqualFold(mode, "ro"),
+		})
 	}
 
-	var envYAML, volumeMountsYAML, volumesYAML strings.Builder
+	return manifestData{
+		Namespace:  runCfg.Namespace,
+		PodName:    runCfg.PodName,
+		Image:      image,
+		WorkingDir: workingDir,
+		Command:    command,
+		Env:        envEntries,
+		Volumes:    volumes,
+	}, nil
+}
 
-	for k, v := range envs {
-		envYAML.WriteString(fmt.Sprintf(`
-      - name: %s
-        value: "%s"`, k, v))
-	}
+func formatList(items []string) string {
+	return fmt.Sprintf("[%s]", strings.Join(QuoteList(items), ", "))
+}
 
-	for _, vol := range volumes {
-		// declara o volumeMounts
-		volumeMountsYAML.WriteString(fmt.Sprintf(`
-      - name: %s
-        mountPath: %s
-        readOnly: %t`, vol.Name, vol.MountPath, vol.MountMode == "ro"))
-
-		// declara o volumes
-		volumesYAML.WriteString(fmt.Sprintf(`
-  - name: %s
-    hostPath:
-      path: %s
-      type: DirectoryOrCreate`, vol.Name, vol.HostPath))
-	}
-
-	manifest := fmt.Sprintf(`
-apiVersion: v1
+const kubernetesManifestTemplate = `apiVersion: v1
 kind: Namespace
 metadata:
-  name: %s
+  name: {{.Namespace}}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: %s
-  namespace: %s
+  name: {{.PodName}}
+  namespace: {{.Namespace}}
   labels:
-    app: %s
+    app: {{.PodName}}
 spec:
   restartPolicy: Never
-  terminationGracePeriodSeconds: 0   
+  terminationGracePeriodSeconds: 0
   containers:
-  - name: main
-    image: %s
-    workingDir: %s
-    command: [%s, %s]
-    env:%s
-    volumeMounts:%s
-  volumes:%s`,
-		namespace,
-		podName,
-		namespace,
-		podName,
-		image,
-		chDir,
-		strings.Join(QuoteList(command), ", "),
-		strings.Join(QuoteList(args), ", "),
-		envYAML.String(),
-		volumeMountsYAML.String(),
-		volumesYAML.String(),
-	)
-
-	return manifest, nil
-}
+    - name: main
+      image: {{.Image}}
+      workingDir: {{.WorkingDir}}
+      command: {{formatList .Command}}
+{{- if .Env }}
+      env:
+{{- range .Env }}
+        - name: {{.Name}}
+          value: "{{.Value}}"
+{{- end }}
+{{- else }}
+      env: []
+{{- end }}
+{{- if .Volumes }}
+      volumeMounts:
+{{- range .Volumes }}
+        - name: {{.Name}}
+          mountPath: {{.MountPath}}
+          readOnly: {{.ReadOnly}}
+{{- end }}
+{{- else }}
+      volumeMounts: []
+{{- end }}
+{{- if .Volumes }}
+  volumes:
+{{- range .Volumes }}
+    - name: {{.Name}}
+      hostPath:
+        path: {{.HostPath}}
+        type: DirectoryOrCreate
+{{- end }}
+{{- else }}
+  volumes: []
+{{- end }}
+`
