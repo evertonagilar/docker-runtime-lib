@@ -26,8 +26,13 @@ type TContainerRuntimeConfig struct {
 	Debug          bool
 }
 
+type TStorageClass struct {
+	Name      string
+	IsDefault bool
+}
+
 type TContainerRuntime interface {
-	Up(podOrContainerName, namespace, composeFile string, waitContainerRunning bool) error
+	Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
 	Down(podOrContainerName, namespace string) error
 	IsContainerRunning(podOrContainerName, namespace string) (bool, error)
 	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
@@ -43,6 +48,7 @@ type TContainerRuntime interface {
 	CopyToContainer(srcPath, podOrContainerName, namespace, destPath string) error
 	CopyToHost(src, podOrContainerName, namespace, dst string) error
 	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, namespace string) (bool, error)
+	GetStorageClassList() ([]TStorageClass, error)
 }
 
 func NewDockerRuntime(config TContainerRuntimeConfig) (TContainerRuntime, error) {

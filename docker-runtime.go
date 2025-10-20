@@ -62,8 +62,8 @@ func (r DockerRuntime) buildDockerCmd(captureOutput bool, args ...string) *exec.
 	return cmd
 }
 
-func (r DockerRuntime) Up(podOrContainerName, namespace, composeFile string, waitContainerRunning bool) error {
-	cmd := r.buildDockerCmd(false, "compose", "-f", composeFile, "up", "-d")
+func (r DockerRuntime) Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error {
+	cmd := r.buildDockerCmd(false, "compose", "-f", manifestFile, "up", "-d")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao executar docker-compose up: %w", err)
 	}
@@ -320,6 +320,11 @@ func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, gateway, labe
 	}
 
 	return nil
+}
+
+// Só existe para Kubernetes, então retorna vazio
+func (r DockerRuntime) GetStorageClassList() ([]TStorageClass, error) {
+	return []TStorageClass{}, nil
 }
 
 // -------------------- Auxiliares --------------------

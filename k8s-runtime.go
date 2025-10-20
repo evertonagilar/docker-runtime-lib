@@ -3,6 +3,7 @@ package container
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -276,6 +277,59 @@ func (r KubernetesRuntime) WaitForFile(fileName string, timeout time.Duration, i
 			}
 		}
 	}
+}
+
+func (r KubernetesRuntime) GetStorageClassList() ([]TStorageClass, error) {
+	cmd := r.buildKubectlCmd(true, "get", "storageclass", "-o", "json")
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errOutput := strings.TrimSpace(stderr.String())
+		return nil, fmt.Errorf("erro ao listar storageclasses: %w. Stderr: %s", err, errOutput)
+	}
+
+	type storageClassMetadata struct {
+		Name        string            `json:"name"`
+		Annotations map[string]string `json:"annotations"`
+	}
+
+	type storageClassItem struct {
+		Metadata storageClassMetadata `json:"metadata"`
+	}
+
+	var scList struct {
+		Items []storageClassItem `json:"items"`
+	}
+
+	if err := json.Unmarshal(stdout.Bytes(), &scList); err != nil {
+		return nil, fmt.Errorf("erro ao interpretar storageclasses: %w", err)
+	}
+
+	result := make([]TStorageClass, 0, len(scList.Items))
+	for _, item := range scList.Items {
+		isDefault := false
+		if annotations := item.Metadata.Annotations; annotations != nil {
+			for _, key := range []string{
+				"storageclass.kubernetes.io/is-default-class",
+				"storageclass.beta.kubernetes.io/is-default-class",
+			} {
+				if value, ok := annotations[key]; ok && strings.EqualFold(value, "true") {
+					isDefault = true
+					break
+				}
+			}
+		}
+
+		result = append(result, TStorageClass{
+			Name:      item.Metadata.Name,
+			IsDefault: isDefault,
+		})
+	}
+
+	return result, nil
 }
 
 // -------------------- Métodos não usados no Kubernetes --------------------
