@@ -24,8 +24,16 @@ type TContainerRuntime interface {
     IsContainerRunning(containerName string) (bool, error)
     StopContainer(containerName string) error
     ShowLogs(containerName string) error
-    Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error
+    Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, storageClass string) error
     ExecInContainer(containerName string, cmd []string) ([]byte, error)
+}
+
+type TVolume struct {
+    HostPath     string
+    MountPath    string
+    ReadOnly     bool
+    Size         string
+    StorageClass string
 }
 ```
 
@@ -52,8 +60,8 @@ type TContainerRuntime interface {
 - **ShowLogs(containerName string) error**  
   Streams the logs from the specified container.
 
-- **Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error**  
-  Runs an ad-hoc command in a new container, allowing a custom entrypoint plus configurable working directory, volumes, UID/GID, namespace overrides, and additional options.
+- **Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, storageClass string) error**  
+  Runs an ad-hoc command in a new container, allowing a custom entrypoint plus configurable working directory, per-volume settings (including size, read-only flag, and storage class overrides), UID/GID, namespace overrides, and additional options.
 
 - **ExecInContainer(containerName string, cmd []string) ([]byte, error)**  
   Executes a command inside an already running container and returns its output.

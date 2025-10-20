@@ -10,7 +10,7 @@ import (
 	"text/template"
 )
 
-func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
+func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, storageClass string) error {
 	ctx := context.Background()
 
 	defaultNamespace := namespace
@@ -30,7 +30,7 @@ func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string
 	}
 	commandSequence := []string{entrypoint, "-c", cmdStr}
 
-	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumeList)
+	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumes, storageClass, podOrContainerName)
 	if err != nil {
 		return fmt.Errorf("erro ao gerar manifesto: %w", err)
 	}
@@ -103,8 +103,8 @@ func extractRunSettings(defaultNamespace, defaultPod string, options []string) r
 	return cfg
 }
 
-func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumeList []string) ([]byte, error) {
-	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumeList)
+func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podOrContainerName string) ([]byte, error) {
+	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumes, storageClass, podOrContainerName)
 	if err != nil {
 		return nil, err
 	}
@@ -124,14 +124,17 @@ func generateManifest(runCfg runSettings, image, workingDir string, command []st
 	return []byte(builder.String()), nil
 }
 
+const defaultPersistentVolumeSize = "5Gi"
+
 type manifestData struct {
-	Namespace  string
-	PodName    string
-	Image      string
-	WorkingDir string
-	Command    []string
-	Env        []envEntry
-	Volumes    []volumeEntry
+	Namespace         string
+	PodName           string
+	Image             string
+	WorkingDir        string
+	Command           []string
+	Env               []envEntry
+	Volumes           []volumeEntry
+	PersistentVolumes []volumeEntry
 }
 
 type envEntry struct {
@@ -140,13 +143,18 @@ type envEntry struct {
 }
 
 type volumeEntry struct {
-	Name      string
-	MountPath string
-	HostPath  string
-	ReadOnly  bool
+	Name                      string
+	MountPath                 string
+	HostPath                  string
+	ReadOnly                  bool
+	IsPersistent              bool
+	StorageClass              string
+	PersistentVolumeSize      string
+	PersistentVolumeName      string
+	PersistentVolumeClaimName string
 }
 
-func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumeList []string) (manifestData, error) {
+func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podOrContainerName string) (manifestData, error) {
 	envEntries := make([]envEntry, 0, len(envs))
 	keys := make([]string, 0, len(envs))
 	for k := range envs {
@@ -157,34 +165,59 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 		envEntries = append(envEntries, envEntry{Name: k, Value: envs[k]})
 	}
 
-	volumes := make([]volumeEntry, 0, len(volumeList))
-	for idx, rawVolume := range volumeList {
-		parts := strings.Split(rawVolume, ":")
-		if len(parts) < 2 {
-			return manifestData{}, fmt.Errorf("volume inválido: %s (esperado formato hostPath:mountPath[:mode])", rawVolume)
+	volumeEntries := make([]volumeEntry, 0, len(volumes))
+	persistentVolumes := make([]volumeEntry, 0, len(volumes))
+	baseName := runCfg.PodName
+	if podOrContainerName != "" {
+		baseName = podOrContainerName
+	}
+	baseName = sanitizeKubernetesName(baseName)
+	if baseName == "" {
+		baseName = "runtime"
+	}
+
+	for idx, volume := range volumes {
+		if volume.HostPath == "" || volume.MountPath == "" {
+			return manifestData{}, fmt.Errorf("volume inválido: hostPath e mountPath são obrigatórios")
 		}
 
-		mode := "rw"
-		if len(parts) >= 3 && parts[2] != "" {
-			mode = parts[2]
-		}
-
-		volumes = append(volumes, volumeEntry{
+		entry := volumeEntry{
 			Name:      fmt.Sprintf("vol-%d", idx),
-			MountPath: parts[1],
-			HostPath:  filepath.Join("/sigctl", parts[0]),
-			ReadOnly:  strings.EqualFold(mode, "ro"),
-		})
+			MountPath: volume.MountPath,
+			HostPath:  filepath.Join("/sigctl", volume.HostPath),
+			ReadOnly:  volume.ReadOnly,
+		}
+
+		effectiveStorageClass := volume.StorageClass
+		if effectiveStorageClass == "" {
+			effectiveStorageClass = storageClass
+		}
+
+		if effectiveStorageClass != "" {
+			entry.IsPersistent = true
+			entry.StorageClass = effectiveStorageClass
+			entry.PersistentVolumeName = fmt.Sprintf("%s-pv-%d", baseName, idx)
+			entry.PersistentVolumeClaimName = fmt.Sprintf("%s-pvc-%d", baseName, idx)
+			size := volume.Size
+			if size == "" {
+				size = defaultPersistentVolumeSize
+			}
+			entry.PersistentVolumeSize = size
+			persistentVolumes = append(persistentVolumes, entry)
+		}
+
+		volumeEntries = append(volumeEntries, entry)
 	}
 
 	return manifestData{
-		Namespace:  runCfg.Namespace,
-		PodName:    runCfg.PodName,
-		Image:      image,
-		WorkingDir: workingDir,
-		Command:    command,
-		Env:        envEntries,
-		Volumes:    volumes,
+		Namespace:         runCfg.Namespace,
+		PodName:           runCfg.PodName,
+		Image:             image,
+		WorkingDir:        workingDir,
+		Command:           command,
+		Env:               envEntries,
+		Volumes:           volumeEntries,
+		PersistentVolumes: persistentVolumes,
 	}, nil
 }
 
@@ -192,10 +225,80 @@ func formatList(items []string) string {
 	return fmt.Sprintf("[%s]", strings.Join(QuoteList(items), ", "))
 }
 
+func sanitizeKubernetesName(name string) string {
+	if name == "" {
+		return ""
+	}
+	name = strings.ToLower(name)
+
+	var builder strings.Builder
+	prevDash := false
+
+	for _, r := range name {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			builder.WriteRune(r)
+			prevDash = false
+		case r == '-':
+			if !prevDash && builder.Len() > 0 {
+				builder.WriteRune(r)
+				prevDash = true
+			}
+		default:
+			if !prevDash && builder.Len() > 0 {
+				builder.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+
+	sanitized := strings.Trim(builder.String(), "-")
+	return sanitized
+}
+
 const kubernetesManifestTemplate = `apiVersion: v1
 kind: Namespace
 metadata:
   name: {{.Namespace}}
+{{- if .PersistentVolumes }}
+{{- range .PersistentVolumes }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.PersistentVolumeName}}
+  labels:
+    app: {{$.PodName}}
+spec:
+  capacity:
+    storage: {{.PersistentVolumeSize}}
+  accessModes:
+    - ReadWriteOnce
+{{- if .StorageClass }}
+  storageClassName: {{.StorageClass}}
+{{- end }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{.HostPath}}
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{.PersistentVolumeClaimName}}
+  namespace: {{$.Namespace}}
+spec:
+{{- if .StorageClass }}
+  storageClassName: {{.StorageClass}}
+{{- end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{.PersistentVolumeSize}}
+  volumeName: {{.PersistentVolumeName}}
+{{- end }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Pod
@@ -235,9 +338,14 @@ spec:
   volumes:
 {{- range .Volumes }}
     - name: {{.Name}}
+{{- if .IsPersistent }}
+      persistentVolumeClaim:
+        claimName: {{.PersistentVolumeClaimName}}
+{{- else }}
       hostPath:
         path: {{.HostPath}}
         type: DirectoryOrCreate
+{{- end }}
 {{- end }}
 {{- else }}
   volumes: []

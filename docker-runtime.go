@@ -77,8 +77,9 @@ func (r DockerRuntime) Up(podOrContainerName, namespace, manifestFile string, wa
 	return nil
 }
 
-func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error {
+func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, storageClass string) error {
 	_ = namespace
+	_ = storageClass
 	args := []string{"run"}
 
 	if runtime.GOOS != "windows" {
@@ -90,8 +91,15 @@ func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, vo
 		}
 	}
 
-	for _, v := range volumeList {
-		args = append(args, "-v", v)
+	for _, volume := range volumes {
+		if volume.HostPath == "" || volume.MountPath == "" {
+			return fmt.Errorf("volume inválido: hostPath e mountPath são obrigatórios")
+		}
+		mapping := fmt.Sprintf("%s:%s", volume.HostPath, volume.MountPath)
+		if volume.ReadOnly {
+			mapping = fmt.Sprintf("%s:ro", mapping)
+		}
+		args = append(args, "-v", mapping)
 	}
 	if chDir != "" {
 		args = append(args, "-w", chDir)

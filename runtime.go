@@ -12,7 +12,7 @@ type TContainerRuntimeConfig struct {
 	ContainerName  string
 	Namespace      string
 	Env            []string
-	Volumes        []string
+	Volumes        []TVolume
 	Ports          map[string]string // ex: {"8080/tcp": "8080", "8787/tcp": "8787"}
 	NetworkName    string
 	RemoteHost     string
@@ -24,6 +24,14 @@ type TContainerRuntimeConfig struct {
 	CommandBinPath string
 	Workspace      string
 	Debug          bool
+}
+
+type TVolume struct {
+	HostPath     string
+	MountPath    string
+	ReadOnly     bool
+	Size         string
+	StorageClass string
 }
 
 type TStorageClass struct {
@@ -38,7 +46,9 @@ type TContainerRuntime interface {
 	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
 	StopContainer(podOrContainerName, namespace string) error
 	ShowLogs(podOrContainerName, namespace string) error
-	Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumeList, otherOptionsList []string, namespace, podOrContainerName string) error
+	Run(cmdStr, entrypoint, chDir, image, uid, gid string,
+		volumes []TVolume, otherOptionsList []string, namespace,
+		podOrContainerName, storageClass string) error
 	ExecInContainer(podOrContainerName, namespace string, cmd []string) ([]byte, error)
 	GetContainerIP(podOrContainerName, namespace string) (string, error)
 	CreateNetwork(networkName, subnet, ipRange, gateway, label string) error
