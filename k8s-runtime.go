@@ -296,8 +296,13 @@ func (r KubernetesRuntime) GetStorageClassList() ([]TStorageClass, error) {
 		Annotations map[string]string `json:"annotations"`
 	}
 
+	type storageClassSpec struct {
+		Provisioner string `json:"provisioner"`
+	}
+
 	type storageClassItem struct {
 		Metadata storageClassMetadata `json:"metadata"`
+		Spec     storageClassSpec     `json:"spec"`
 	}
 
 	var scList struct {
@@ -323,9 +328,13 @@ func (r KubernetesRuntime) GetStorageClassList() ([]TStorageClass, error) {
 			}
 		}
 
+		provisioner := strings.TrimSpace(item.Spec.Provisioner)
+		isDinamic := provisioner != "" && !strings.EqualFold(provisioner, "kubernetes.io/no-provisioner")
+
 		result = append(result, TStorageClass{
 			Name:      item.Metadata.Name,
 			IsDefault: isDefault,
+			IsDinamic: isDinamic,
 		})
 	}
 

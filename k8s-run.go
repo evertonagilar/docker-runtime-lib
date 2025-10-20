@@ -177,27 +177,35 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 	}
 
 	for idx, volume := range volumes {
-		if volume.HostPath == "" || volume.MountPath == "" {
-			return manifestData{}, fmt.Errorf("volume inválido: hostPath e mountPath são obrigatórios")
-		}
-
-		entry := volumeEntry{
-			Name:      fmt.Sprintf("vol-%d", idx),
-			MountPath: volume.MountPath,
-			HostPath:  filepath.Join("/sigctl", volume.HostPath),
-			ReadOnly:  volume.ReadOnly,
-		}
-
 		effectiveStorageClass := volume.StorageClass
 		if effectiveStorageClass == "" {
 			effectiveStorageClass = storageClass
 		}
 
+		if volume.MountPath == "" {
+			return manifestData{}, fmt.Errorf("volume inválido: mountPath é obrigatório")
+		}
+		if volume.HostPath == "" && effectiveStorageClass == "" {
+			return manifestData{}, fmt.Errorf("volume inválido: hostPath é obrigatório quando storageClass não é informado")
+		}
+
+		entry := volumeEntry{
+			Name:      fmt.Sprintf("vol-%d", idx),
+			MountPath: volume.MountPath,
+			ReadOnly:  volume.ReadOnly,
+		}
+
+		if volume.HostPath != "" {
+			entry.HostPath = filepath.Join("/sigctl", volume.HostPath)
+		}
+
 		if effectiveStorageClass != "" {
 			entry.IsPersistent = true
 			entry.StorageClass = effectiveStorageClass
-			entry.PersistentVolumeName = fmt.Sprintf("%s-pv-%d", baseName, idx)
 			entry.PersistentVolumeClaimName = fmt.Sprintf("%s-pvc-%d", baseName, idx)
+			if volume.HostPath != "" {
+				entry.PersistentVolumeName = fmt.Sprintf("%s-pv-%d", baseName, idx)
+			}
 			size := volume.Size
 			if size == "" {
 				size = defaultPersistentVolumeSize
@@ -262,6 +270,7 @@ metadata:
   name: {{.Namespace}}
 {{- if .PersistentVolumes }}
 {{- range .PersistentVolumes }}
+{{- if .HostPath }}
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -281,6 +290,7 @@ spec:
   hostPath:
     path: {{.HostPath}}
     type: DirectoryOrCreate
+{{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -296,7 +306,9 @@ spec:
   resources:
     requests:
       storage: {{.PersistentVolumeSize}}
+{{- if .HostPath }}
   volumeName: {{.PersistentVolumeName}}
+{{- end }}
 {{- end }}
 {{- end }}
 ---

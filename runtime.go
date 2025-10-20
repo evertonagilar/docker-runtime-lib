@@ -37,6 +37,7 @@ type TVolume struct {
 type TStorageClass struct {
 	Name      string
 	IsDefault bool
+	IsDinamic bool
 }
 
 type TContainerRuntime interface {
