@@ -185,20 +185,42 @@ func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, inter
 	}
 }
 
-func (r DockerRuntime) IsContainerRunning(podOrContainerName, namespace string) (bool, error) {
+func (r DockerRuntime) GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error) {
 	_ = namespace
-	cmd := exec.Command(r.config.CommandBinPath, r.buildDockerArgs("inspect", "-f", "{{.State.Running}}", podOrContainerName)...)
+	cmd := r.buildDockerCmd(true, "inspect", "-f", "{{.State.Status}}", podOrContainerName)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
-	if err != nil {
-		return false, nil
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		if strings.Contains(stderrStr, "No such object") || strings.Contains(stderrStr, "Error: No such container") {
+			return ContainerStatusNotFound, nil
+		}
+		return ContainerStatusUnknown, fmt.Errorf("erro ao inspecionar container %s: %w. Stderr: %s", podOrContainerName, err, stderrStr)
 	}
 
-	return strings.TrimSpace(stdout.String()) == "true", nil
+	switch strings.TrimSpace(stdout.String()) {
+	case "running":
+		return ContainerStatusRunning, nil
+	case "created", "restarting", "removing":
+		return ContainerStatusPending, nil
+	case "exited", "dead":
+		return ContainerStatusStopped, nil
+	case "paused":
+		return ContainerStatusPaused, nil
+	default:
+		return ContainerStatusUnknown, nil
+	}
+}
+
+func (r DockerRuntime) IsContainerRunning(podOrContainerName, namespace string) (bool, error) {
+	status, err := r.GetContainerStatus(podOrContainerName, namespace)
+	if err != nil {
+		return false, err
+	}
+	return status == ContainerStatusRunning, nil
 }
 
 func (r DockerRuntime) WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error {

@@ -104,10 +104,10 @@ func (r KubernetesRuntime) Down(podOrContainerName, namespace string) error {
 	return nil
 }
 
-func (r KubernetesRuntime) IsContainerRunning(podOrContainerName, namespace string) (bool, error) {
+func (r KubernetesRuntime) GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error) {
 	var stdout, stderr bytes.Buffer
 
-	for attempt := 1; attempt <= 2; attempt++ {
+	for attempt := 1; attempt <= 3; attempt++ {
 		args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "jsonpath={.status.phase}"})
 		cmd := r.buildKubectlCmd(true, args...)
 		stdout.Reset()
@@ -115,24 +115,40 @@ func (r KubernetesRuntime) IsContainerRunning(podOrContainerName, namespace stri
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		err := cmd.Run()
-		if err == nil {
-			status := strings.TrimSpace(stdout.String())
-			return (status == "Running" || status == "Succeeded"), nil
+		if err := cmd.Run(); err == nil {
+			switch strings.TrimSpace(stdout.String()) {
+			case "Running":
+				return ContainerStatusRunning, nil
+			case "Succeeded":
+				return ContainerStatusSucceeded, nil
+			case "Pending":
+				return ContainerStatusPending, nil
+			case "Failed":
+				return ContainerStatusFailed, nil
+			case "Unknown":
+				return ContainerStatusUnknown, nil
+			default:
+				return ContainerStatusUnknown, nil
+			}
 		}
 
 		stderrStr := strings.TrimSpace(stderr.String())
-
-		// Se for erro de "not found", pode parar imediatamente
 		if strings.Contains(stderrStr, "NotFound") {
-			return false, nil
+			return ContainerStatusNotFound, nil
 		}
 
-		// Retry simples
 		time.Sleep(1 * time.Second)
 	}
 
-	return false, fmt.Errorf("não foi possível verificar o estado do pod '%s' após 2 tentativas", podOrContainerName)
+	return ContainerStatusUnknown, fmt.Errorf("não foi possível verificar o estado do pod '%s' após 3 tentativas", podOrContainerName)
+}
+
+func (r KubernetesRuntime) IsContainerRunning(podOrContainerName, namespace string) (bool, error) {
+	status, err := r.GetContainerStatus(podOrContainerName, namespace)
+	if err != nil {
+		return false, err
+	}
+	return status == ContainerStatusRunning || status == ContainerStatusSucceeded, nil
 }
 
 func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error {

@@ -7,6 +7,19 @@ import (
 
 var ErrContainerNotFound = errors.New("container não encontrado")
 
+type ContainerStatus string
+
+const (
+	ContainerStatusUnknown   ContainerStatus = "unknown"
+	ContainerStatusNotFound  ContainerStatus = "not_found"
+	ContainerStatusRunning   ContainerStatus = "running"
+	ContainerStatusStopped   ContainerStatus = "stopped"
+	ContainerStatusPending   ContainerStatus = "pending"
+	ContainerStatusFailed    ContainerStatus = "failed"
+	ContainerStatusSucceeded ContainerStatus = "succeeded"
+	ContainerStatusPaused    ContainerStatus = "paused"
+)
+
 type TContainerRuntimeConfig struct {
 	Image          string
 	ContainerName  string
@@ -43,6 +56,7 @@ type TStorageClass struct {
 type TContainerRuntime interface {
 	Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
 	Down(podOrContainerName, namespace string) error
+	GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error)
 	IsContainerRunning(podOrContainerName, namespace string) (bool, error)
 	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
 	StopContainer(podOrContainerName, namespace string) error
