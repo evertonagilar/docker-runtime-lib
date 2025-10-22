@@ -19,7 +19,7 @@ The main interface is:
 ```go
 type TContainerRuntime interface {
     Up(containerName, composeFile string, WaitContainerRunning bool) error
-    Down(containerName string) error
+    Down(containerName string, force bool) error
     CopyToContainer(srcPath, containerName, destPath string) error
     IsContainerRunning(containerName string) (bool, error)
     StopContainer(containerName string) error
@@ -42,8 +42,8 @@ type TVolume struct {
 - **Up(containerName, composeFile string, WaitContainerRunning bool) error**  
   Starts the containers defined in the provided Docker Compose file.
 
-- **Down(containerName string) error**  
-  Stops and removes the containers.
+- **Down(containerName string, force bool) error**  
+  Stops and removes the containers, forcing deletion when `force` is `true`.
 
 - **CopyToContainer(srcPath, containerName, destPath string) error**  
   Copies a file or directory from the host machine to the specified container.

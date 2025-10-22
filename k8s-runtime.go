@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,8 +91,14 @@ func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string
 	return nil
 }
 
-func (r KubernetesRuntime) Down(podOrContainerName, namespace string) error {
-	deletePodArgs := addNamespaceArg(namespace, []string{"delete", "pod", podOrContainerName, "--ignore-not-found", "--grace-period", "3"})
+func (r KubernetesRuntime) Down(podOrContainerName, namespace string, force bool) error {
+	deletePodArgs := []string{"delete", "pod", podOrContainerName, "--ignore-not-found"}
+	if force {
+		deletePodArgs = append(deletePodArgs, "--grace-period", "0", "--force")
+	} else {
+		deletePodArgs = append(deletePodArgs, "--grace-period", "3")
+	}
+	deletePodArgs = addNamespaceArg(namespace, deletePodArgs)
 	cmd := r.buildKubectlCmd(false, deletePodArgs...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao deletar pod %s: %w", podOrContainerName, err)
@@ -152,29 +159,55 @@ func (r KubernetesRuntime) IsContainerRunning(podOrContainerName, namespace stri
 }
 
 func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error {
-	const interval = 2 * time.Second
-	start := time.Now()
+	const interval = 3 * time.Second
+	deadline := time.Now().Add(timeout)
+	var lastPhase string
+	var lastDetail string
+
 	time.Sleep(interval)
-	for {
-		running, _ := r.IsContainerRunning(podOrContainerName, namespace)
-		if running {
-			args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "jsonpath={.status.containerStatuses[0].ready}"})
-			cmd := r.buildKubectlCmd(true, args...)
-			var stdout bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stdout
-			_ = cmd.Run()
 
-			if strings.TrimSpace(stdout.String()) == "true" {
-				return nil
-			}
+	for time.Now().Before(deadline) {
+		podStatus, err := r.getPodDetailedStatus(podOrContainerName, namespace)
+		if errors.Is(err, ErrContainerNotFound) {
+			time.Sleep(interval)
+			continue
+		}
+		if err != nil {
+			lastDetail = err.Error()
+			time.Sleep(interval)
+			continue
 		}
 
-		if time.Since(start) > timeout {
-			return fmt.Errorf("timeout aguardando pod '%s' ficar pronto", podOrContainerName)
+		lastPhase = podStatus.Status.Phase
+
+		switch podStatus.Status.Phase {
+		case "Failed":
+			return fmt.Errorf("pod '%s' falhou: %s", podOrContainerName, summarizePodConditions(podStatus.Status.Conditions))
+		case "Succeeded":
+			return nil
 		}
+
+		ready, detail := isPodReady(podStatus)
+		if ready {
+			return nil
+		}
+		if detail != "" {
+			lastDetail = detail
+		}
+
 		time.Sleep(interval)
 	}
+
+	if lastDetail != "" && lastPhase != "" {
+		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Última fase: %s. Detalhes: %s", podOrContainerName, lastPhase, lastDetail)
+	}
+	if lastPhase != "" {
+		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Última fase: %s", podOrContainerName, lastPhase)
+	}
+	if lastDetail != "" {
+		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Detalhes: %s", podOrContainerName, lastDetail)
+	}
+	return fmt.Errorf("timeout aguardando pod '%s' ficar pronto", podOrContainerName)
 }
 
 func (r KubernetesRuntime) StopContainer(podOrContainerName, namespace string) error {
@@ -206,6 +239,166 @@ func (r KubernetesRuntime) ExecInContainer(podOrContainerName, namespace string,
 }
 
 // -------------------- Utilidades --------------------
+
+type kubectlPodStatus struct {
+	Status struct {
+		Phase              string          `json:"phase"`
+		Conditions         []podCondition  `json:"conditions"`
+		ContainerStatuses  []podContainer  `json:"containerStatuses"`
+		InitContainerState []podInitStatus `json:"initContainerStatuses"`
+	} `json:"status"`
+}
+
+type podCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+type podContainer struct {
+	Name  string            `json:"name"`
+	Ready bool              `json:"ready"`
+	State podContainerState `json:"state"`
+}
+
+type podInitStatus struct {
+	Name  string            `json:"name"`
+	State podContainerState `json:"state"`
+}
+
+type podContainerState struct {
+	Waiting    *podStateDetail `json:"waiting"`
+	Terminated *podTerminated  `json:"terminated"`
+}
+
+type podStateDetail struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+type podTerminated struct {
+	Reason   string `json:"reason"`
+	Message  string `json:"message"`
+	ExitCode int    `json:"exitCode"`
+}
+
+func (r KubernetesRuntime) getPodDetailedStatus(podOrContainerName, namespace string) (*kubectlPodStatus, error) {
+	args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "json"})
+	cmd := r.buildKubectlCmd(true, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		if strings.Contains(stderrStr, "NotFound") {
+			return nil, ErrContainerNotFound
+		}
+		return nil, fmt.Errorf("erro ao obter status do pod %s: %w. Stderr: %s", podOrContainerName, err, stderrStr)
+	}
+
+	var status kubectlPodStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return nil, fmt.Errorf("erro ao decodificar status do pod %s: %w", podOrContainerName, err)
+	}
+
+	return &status, nil
+}
+
+func isPodReady(podStatus *kubectlPodStatus) (bool, string) {
+	if podStatus == nil {
+		return false, "status do pod indisponível"
+	}
+
+	if status, msg := conditionStatus(podStatus.Status.Conditions, "Initialized"); status == "False" {
+		return false, msg
+	}
+
+	if status, msg := conditionStatus(podStatus.Status.Conditions, "Ready"); status != "True" {
+		if msg != "" {
+			return false, msg
+		}
+		return false, "condição Ready ainda não satisfeita"
+	}
+
+	if status, msg := conditionStatus(podStatus.Status.Conditions, "ContainersReady"); status == "False" {
+		return false, msg
+	}
+
+	if len(podStatus.Status.ContainerStatuses) == 0 {
+		return false, "status dos containers ainda não disponível"
+	}
+
+	for _, cs := range podStatus.Status.ContainerStatuses {
+		if cs.Ready {
+			continue
+		}
+
+		if cs.State.Waiting != nil {
+			return false, fmt.Sprintf("container %s aguardando: %s - %s", cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+		}
+
+		if cs.State.Terminated != nil && cs.State.Terminated.Reason != "Completed" {
+			return false, fmt.Sprintf("container %s finalizado (%d): %s - %s", cs.Name, cs.State.Terminated.ExitCode, cs.State.Terminated.Reason, cs.State.Terminated.Message)
+		}
+
+		return false, fmt.Sprintf("container %s não está pronto", cs.Name)
+	}
+
+	for _, init := range podStatus.Status.InitContainerState {
+		if init.State.Terminated != nil && init.State.Terminated.Reason == "Completed" {
+			continue
+		}
+		if init.State.Waiting != nil {
+			return false, fmt.Sprintf("init container %s aguardando: %s - %s", init.Name, init.State.Waiting.Reason, init.State.Waiting.Message)
+		}
+		if init.State.Terminated != nil {
+			return false, fmt.Sprintf("init container %s finalizado (%d): %s - %s", init.Name, init.State.Terminated.ExitCode, init.State.Terminated.Reason, init.State.Terminated.Message)
+		}
+	}
+
+	return true, ""
+}
+
+func conditionStatus(conditions []podCondition, conditionType string) (string, string) {
+	for _, cond := range conditions {
+		if cond.Type != conditionType {
+			continue
+		}
+		message := cond.Message
+		if message == "" {
+			message = cond.Reason
+		}
+		return cond.Status, message
+	}
+	return "", ""
+}
+
+func summarizePodConditions(conditions []podCondition) string {
+	if len(conditions) == 0 {
+		return "condições indisponíveis"
+	}
+
+	var summaries []string
+	for _, cond := range conditions {
+		status := cond.Status
+		if status == "" {
+			status = "desconhecido"
+		}
+		message := cond.Message
+		if message == "" {
+			message = cond.Reason
+		}
+		if message != "" {
+			summaries = append(summaries, fmt.Sprintf("%s=%s (%s)", cond.Type, status, message))
+		} else {
+			summaries = append(summaries, fmt.Sprintf("%s=%s", cond.Type, status))
+		}
+	}
+	return strings.Join(summaries, "; ")
+}
 
 func (r KubernetesRuntime) GetContainerIP(podOrContainerName, namespace string) (string, error) {
 	args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "jsonpath={.status.podIP}"})

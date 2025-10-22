@@ -30,7 +30,7 @@ func TestUpAndDown(t *testing.T) {
 	t.Log("✅ Container subiu com sucesso")
 
 	t.Log("⬇️ Derrubando container...")
-	if err := r.Down("test_container", ""); err != nil {
+	if err := r.Down("test_container", "", true); err != nil {
 		t.Fatalf("falha ao derrubar container: %v", err)
 	}
 	t.Log("✅ Container derrubado com sucesso")
@@ -47,7 +47,7 @@ func TestIsContainerRunning(t *testing.T) {
 	}
 	defer func() {
 		t.Log("⬇️ Derrubando container após teste de status...")
-		if err := r.Down("test_container", ""); err != nil {
+		if err := r.Down("test_container", "", true); err != nil {
 			t.Fatalf("falha ao derrubar container: %v", err)
 		}
 	}()
@@ -85,7 +85,7 @@ func TestStopContainer(t *testing.T) {
 	}
 	defer func() {
 		t.Log("⬇️  Derrubando container após teste de stop...")
-		if err := r.Down("test_container", ""); err != nil {
+		if err := r.Down("test_container", "", true); err != nil {
 			t.Fatalf("falha ao derrubar container: %v", err)
 		}
 	}()
@@ -121,7 +121,7 @@ func TestCopyToContainer(t *testing.T) {
 	}
 	defer func() {
 		t.Log("⬇️  Derrubando container após teste de copy...")
-		if err := r.Down(containerName, ""); err != nil {
+		if err := r.Down(containerName, "", true); err != nil {
 			t.Fatalf("falha ao derrubar container: %v", err)
 		}
 	}()

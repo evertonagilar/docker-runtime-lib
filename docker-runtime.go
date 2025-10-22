@@ -124,8 +124,14 @@ func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, vo
 	return cmd.Run()
 }
 
-func (r DockerRuntime) Down(podOrContainerName, _ string) error {
-	stopCmd := r.buildDockerCmd(false, "rm", "--force", podOrContainerName)
+func (r DockerRuntime) Down(podOrContainerName, _ string, force bool) error {
+	args := []string{"rm"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, podOrContainerName)
+
+	stopCmd := r.buildDockerCmd(false, args...)
 	if err := stopCmd.Run(); err != nil {
 		return fmt.Errorf("falha ao parar container: %w", err)
 	}
