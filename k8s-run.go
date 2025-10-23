@@ -10,16 +10,16 @@ import (
 	"text/template"
 )
 
-func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, storageClass string) error {
+func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podName, containerName, storageClass string) error {
 	ctx := context.Background()
 
 	defaultNamespace := namespace
 	if defaultNamespace == "" {
 		defaultNamespace = r.config.Namespace
 	}
-	defaultPod := podOrContainerName
+	defaultPod := podName
 	if defaultPod == "" {
-		defaultPod = r.config.ContainerName
+		defaultPod = r.config.PodName
 	}
 
 	runCfg := extractRunSettings(defaultNamespace, defaultPod, otherOptionsList)
@@ -30,7 +30,7 @@ func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string
 	}
 	commandSequence := []string{entrypoint, "-c", cmdStr}
 
-	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumes, storageClass, podOrContainerName)
+	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumes, storageClass, podName, containerName)
 	if err != nil {
 		return fmt.Errorf("erro ao gerar manifesto: %w", err)
 	}
@@ -74,8 +74,9 @@ func buildEnvMap(uid, gid string, debugEnabled bool) map[string]string {
 }
 
 type runSettings struct {
-	PodName   string
-	Namespace string
+	PodName       string
+	ContainerName string
+	Namespace     string
 }
 
 func extractRunSettings(defaultNamespace, defaultPod string, options []string) runSettings {
@@ -103,8 +104,8 @@ func extractRunSettings(defaultNamespace, defaultPod string, options []string) r
 	return cfg
 }
 
-func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podOrContainerName string) ([]byte, error) {
-	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumes, storageClass, podOrContainerName)
+func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName string) ([]byte, error) {
+	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumes, storageClass, podName, containerName)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +130,7 @@ const defaultPersistentVolumeSize = "5Gi"
 type manifestData struct {
 	Namespace         string
 	PodName           string
+	ContainerName     string
 	Image             string
 	WorkingDir        string
 	Command           []string
@@ -154,7 +156,7 @@ type volumeEntry struct {
 	PersistentVolumeClaimName string
 }
 
-func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podOrContainerName string) (manifestData, error) {
+func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName string) (manifestData, error) {
 	envEntries := make([]envEntry, 0, len(envs))
 	keys := make([]string, 0, len(envs))
 	for k := range envs {
@@ -168,8 +170,8 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 	volumeEntries := make([]volumeEntry, 0, len(volumes))
 	persistentVolumes := make([]volumeEntry, 0, len(volumes))
 	baseName := runCfg.PodName
-	if podOrContainerName != "" {
-		baseName = podOrContainerName
+	if podName != "" {
+		baseName = podName
 	}
 	baseName = sanitizeKubernetesName(baseName)
 	if baseName == "" {
@@ -217,9 +219,19 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 		volumeEntries = append(volumeEntries, entry)
 	}
 
+	effectiveContainerName := containerName
+	if effectiveContainerName == "" {
+		effectiveContainerName = runCfg.PodName
+	}
+	effectiveContainerName = sanitizeKubernetesName(effectiveContainerName)
+	if effectiveContainerName == "" {
+		effectiveContainerName = "main"
+	}
+
 	return manifestData{
 		Namespace:         runCfg.Namespace,
 		PodName:           runCfg.PodName,
+		ContainerName:     effectiveContainerName,
 		Image:             image,
 		WorkingDir:        workingDir,
 		Command:           command,
@@ -323,7 +335,7 @@ spec:
   restartPolicy: Never
   terminationGracePeriodSeconds: 0
   containers:
-    - name: main
+    - name: {{.ContainerName}}
       image: {{.Image}}
       workingDir: {{.WorkingDir}}
       command: {{formatList .Command}}

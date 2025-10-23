@@ -15,7 +15,7 @@ func TestGenerateManifestNoVolumes(t *testing.T) {
 
 	command := []string{"/bin/bash", "-c", "echo hello"}
 
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestGenerateManifestWithVolumes(t *testing.T) {
 			ReadOnly:  true,
 		},
 	}
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestGenerateManifestWithStorageClass(t *testing.T) {
 			MountPath: "/mnt/storage",
 		},
 	}
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "fast-storage", "demo-run")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "fast-storage", "demo-run", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestGenerateManifestWithDynamicProvisioning(t *testing.T) {
 			StorageClass: "fast-storage",
 		},
 	}
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "dynamic-run")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "dynamic-run", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}

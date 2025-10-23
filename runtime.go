@@ -22,7 +22,7 @@ const (
 
 type TContainerRuntimeConfig struct {
 	Image          string
-	ContainerName  string
+	PodName        string
 	Namespace      string
 	Env            []string
 	Volumes        []TVolume
@@ -54,25 +54,25 @@ type TStorageClass struct {
 }
 
 type TContainerRuntime interface {
-	Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
-	Down(podOrContainerName, namespace string, force bool) error
-	GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error)
-	IsContainerRunning(podOrContainerName, namespace string) (bool, error)
-	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
-	StopContainer(podOrContainerName, namespace string) error
-	ShowLogs(podOrContainerName, namespace string) error
+	Up(podName, namespace, manifestFile string, waitContainerRunning bool) error
+	Down(podName, namespace string, force bool) error
+	GetContainerStatus(podName, namespace string) (ContainerStatus, error)
+	IsContainerRunning(podName, namespace string) (bool, error)
+	WaitContainerRunning(podName, namespace string, timeout time.Duration) error
+	StopContainer(podName, namespace string) error
+	ShowLogs(podName, containerName, namespace string) error
 	Run(cmdStr, entrypoint, chDir, image, uid, gid string,
 		volumes []TVolume, otherOptionsList []string, namespace,
-		podOrContainerName, storageClass string) error
-	ExecInContainer(podOrContainerName, namespace string, cmd []string) ([]byte, error)
-	GetContainerIP(podOrContainerName, namespace string) (string, error)
+		podName, containerName, storageClass string) error
+	ExecInContainer(podName, containerName, namespace string, cmd []string) ([]byte, error)
+	GetContainerIP(podName, namespace string) (string, error)
 	CreateNetwork(networkName, subnet, ipRange, gateway, label string) error
 	CreateVolume(volumeName string) error
 	IsVolumeExist(volumeName string) bool
 	IsNetworkExist(networkName string) bool
-	CopyToContainer(srcPath, podOrContainerName, namespace, destPath string) error
-	CopyToHost(src, podOrContainerName, namespace, dst string) error
-	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, namespace string) (bool, error)
+	CopyToContainer(src, podName, containerName, namespace, dst string) error
+	CopyToHost(src, podName, containerName, namespace, dst string) error
+	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podName, containerName, namespace string) (bool, error)
 	GetStorageClassList() ([]TStorageClass, error)
 }
 

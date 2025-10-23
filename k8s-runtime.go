@@ -75,7 +75,7 @@ func addNamespaceArg(namespace string, args []string) []string {
 // -------------------- Métodos principais --------------------
 
 // Up cria o pod/deployment a partir de um manifesto YAML
-func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error {
+func (r KubernetesRuntime) Up(podName, namespace, manifestFile string, waitContainerRunning bool) error {
 	args := addNamespaceArg(namespace, []string{"apply", "-f", manifestFile})
 	cmd := r.buildKubectlCmd(false, args...)
 	if err := cmd.Run(); err != nil {
@@ -83,39 +83,37 @@ func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string
 	}
 
 	if waitContainerRunning {
-		if err := r.WaitContainerRunning(podOrContainerName, namespace, 120*time.Second); err != nil {
-			return fmt.Errorf("o pod %s não ficou pronto: %w", podOrContainerName, err)
+		if err := r.WaitContainerRunning(podName, namespace, 120*time.Second); err != nil {
+			return fmt.Errorf("o pod %s não ficou pronto: %w", podName, err)
 		}
 	}
 
 	return nil
 }
 
-func (r KubernetesRuntime) Down(podOrContainerName, namespace string, force bool) error {
-	deletePodArgs := []string{"delete", "pod", podOrContainerName, "--ignore-not-found"}
+func (r KubernetesRuntime) Down(podName, namespace string, force bool) error {
+	deletePodArgs := []string{"delete", "pod", podName, "--ignore-not-found"}
 	if force {
-		deletePodArgs = append(deletePodArgs, "--grace-period", "0", "--force")
-	} else {
 		deletePodArgs = append(deletePodArgs, "--grace-period", "3")
 	}
 	deletePodArgs = addNamespaceArg(namespace, deletePodArgs)
 	cmd := r.buildKubectlCmd(false, deletePodArgs...)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao deletar pod %s: %w", podOrContainerName, err)
+		return fmt.Errorf("erro ao deletar pod %s: %w", podName, err)
 	}
-	deleteSvcArgs := addNamespaceArg(namespace, []string{"delete", "svc", podOrContainerName, "--ignore-not-found"})
+	deleteSvcArgs := addNamespaceArg(namespace, []string{"delete", "svc", podName, "--ignore-not-found"})
 	cmd = r.buildKubectlCmd(false, deleteSvcArgs...)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao deletar svc %s: %w", podOrContainerName, err)
+		return fmt.Errorf("erro ao deletar svc %s: %w", podName, err)
 	}
 	return nil
 }
 
-func (r KubernetesRuntime) GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error) {
+func (r KubernetesRuntime) GetContainerStatus(podName, namespace string) (ContainerStatus, error) {
 	var stdout, stderr bytes.Buffer
 
 	for attempt := 1; attempt <= 3; attempt++ {
-		args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "jsonpath={.status.phase}"})
+		args := addNamespaceArg(namespace, []string{"get", "pod", podName, "-o", "jsonpath={.status.phase}"})
 		cmd := r.buildKubectlCmd(true, args...)
 		stdout.Reset()
 		stderr.Reset()
@@ -147,18 +145,18 @@ func (r KubernetesRuntime) GetContainerStatus(podOrContainerName, namespace stri
 		time.Sleep(1 * time.Second)
 	}
 
-	return ContainerStatusUnknown, fmt.Errorf("não foi possível verificar o estado do pod '%s' após 3 tentativas", podOrContainerName)
+	return ContainerStatusUnknown, fmt.Errorf("não foi possível verificar o estado do pod '%s' após 3 tentativas", podName)
 }
 
-func (r KubernetesRuntime) IsContainerRunning(podOrContainerName, namespace string) (bool, error) {
-	status, err := r.GetContainerStatus(podOrContainerName, namespace)
+func (r KubernetesRuntime) IsContainerRunning(podName, namespace string) (bool, error) {
+	status, err := r.GetContainerStatus(podName, namespace)
 	if err != nil {
 		return false, err
 	}
 	return status == ContainerStatusRunning || status == ContainerStatusSucceeded, nil
 }
 
-func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error {
+func (r KubernetesRuntime) WaitContainerRunning(podName, namespace string, timeout time.Duration) error {
 	const interval = 3 * time.Second
 	deadline := time.Now().Add(timeout)
 	var lastPhase string
@@ -167,7 +165,7 @@ func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace st
 	time.Sleep(interval)
 
 	for time.Now().Before(deadline) {
-		podStatus, err := r.getPodDetailedStatus(podOrContainerName, namespace)
+		podStatus, err := r.getPodDetailedStatus(podName, namespace)
 		if errors.Is(err, ErrContainerNotFound) {
 			time.Sleep(interval)
 			continue
@@ -182,7 +180,7 @@ func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace st
 
 		switch podStatus.Status.Phase {
 		case "Failed":
-			return fmt.Errorf("pod '%s' falhou: %s", podOrContainerName, summarizePodConditions(podStatus.Status.Conditions))
+			return fmt.Errorf("pod '%s' falhou: %s", podName, summarizePodConditions(podStatus.Status.Conditions))
 		case "Succeeded":
 			return nil
 		}
@@ -199,31 +197,49 @@ func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace st
 	}
 
 	if lastDetail != "" && lastPhase != "" {
-		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Última fase: %s. Detalhes: %s", podOrContainerName, lastPhase, lastDetail)
+		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Última fase: %s. Detalhes: %s", podName, lastPhase, lastDetail)
 	}
 	if lastPhase != "" {
-		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Última fase: %s", podOrContainerName, lastPhase)
+		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Última fase: %s", podName, lastPhase)
 	}
 	if lastDetail != "" {
-		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Detalhes: %s", podOrContainerName, lastDetail)
+		return fmt.Errorf("timeout aguardando pod '%s' ficar pronto. Detalhes: %s", podName, lastDetail)
 	}
-	return fmt.Errorf("timeout aguardando pod '%s' ficar pronto", podOrContainerName)
+	return fmt.Errorf("timeout aguardando pod '%s' ficar pronto", podName)
 }
 
-func (r KubernetesRuntime) StopContainer(podOrContainerName, namespace string) error {
-	args := addNamespaceArg(namespace, []string{"delete", "pod", podOrContainerName})
+func (r KubernetesRuntime) StopContainer(podName, namespace string) error {
+	args := addNamespaceArg(namespace, []string{"delete", "pod", podName})
 	cmd := r.buildKubectlCmd(false, args...)
 	return cmd.Run()
 }
 
-func (r KubernetesRuntime) ShowLogs(podOrContainerName, namespace string) error {
-	args := addNamespaceArg(namespace, []string{"logs", "-f", podOrContainerName})
+func (r KubernetesRuntime) ShowLogs(podName, containerName, namespace string) error {
+	if podName == "" {
+		return fmt.Errorf("nome do pod deve ser informado")
+	}
+
+	args := []string{"logs", podName}
+	if containerName != "" {
+		args = append(args, "-c", containerName)
+	}
+	args = append(args, "-f")
+	args = addNamespaceArg(namespace, args)
 	cmd := r.buildKubectlCmd(false, args...)
 	return cmd.Run()
 }
 
-func (r KubernetesRuntime) ExecInContainer(podOrContainerName, namespace string, cmdArgs []string) ([]byte, error) {
-	args := append([]string{"exec", podOrContainerName, "--"}, cmdArgs...)
+func (r KubernetesRuntime) ExecInContainer(podName, containerName, namespace string, cmdArgs []string) ([]byte, error) {
+	if podName == "" {
+		return nil, fmt.Errorf("nome do pod deve ser informado")
+	}
+
+	args := []string{"exec", podName}
+	if containerName != "" {
+		args = append(args, "-c", containerName)
+	}
+	args = append(args, "--")
+	args = append(args, cmdArgs...)
 	args = addNamespaceArg(namespace, args)
 	cmd := r.buildKubectlCmd(true, args...)
 
@@ -283,8 +299,8 @@ type podTerminated struct {
 	ExitCode int    `json:"exitCode"`
 }
 
-func (r KubernetesRuntime) getPodDetailedStatus(podOrContainerName, namespace string) (*kubectlPodStatus, error) {
-	args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "json"})
+func (r KubernetesRuntime) getPodDetailedStatus(podName, namespace string) (*kubectlPodStatus, error) {
+	args := addNamespaceArg(namespace, []string{"get", "pod", podName, "-o", "json"})
 	cmd := r.buildKubectlCmd(true, args...)
 
 	var stdout, stderr bytes.Buffer
@@ -296,12 +312,12 @@ func (r KubernetesRuntime) getPodDetailedStatus(podOrContainerName, namespace st
 		if strings.Contains(stderrStr, "NotFound") {
 			return nil, ErrContainerNotFound
 		}
-		return nil, fmt.Errorf("erro ao obter status do pod %s: %w. Stderr: %s", podOrContainerName, err, stderrStr)
+		return nil, fmt.Errorf("erro ao obter status do pod %s: %w. Stderr: %s", podName, err, stderrStr)
 	}
 
 	var status kubectlPodStatus
 	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
-		return nil, fmt.Errorf("erro ao decodificar status do pod %s: %w", podOrContainerName, err)
+		return nil, fmt.Errorf("erro ao decodificar status do pod %s: %w", podName, err)
 	}
 
 	return &status, nil
@@ -400,8 +416,8 @@ func summarizePodConditions(conditions []podCondition) string {
 	return strings.Join(summaries, "; ")
 }
 
-func (r KubernetesRuntime) GetContainerIP(podOrContainerName, namespace string) (string, error) {
-	args := addNamespaceArg(namespace, []string{"get", "pod", podOrContainerName, "-o", "jsonpath={.status.podIP}"})
+func (r KubernetesRuntime) GetContainerIP(podName, namespace string) (string, error) {
+	args := addNamespaceArg(namespace, []string{"get", "pod", podName, "-o", "jsonpath={.status.podIP}"})
 	cmd := r.buildKubectlCmd(true, args...)
 
 	var stdout, stderr bytes.Buffer
@@ -409,25 +425,33 @@ func (r KubernetesRuntime) GetContainerIP(podOrContainerName, namespace string) 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("falha ao obter IP do pod %s: %w. Stderr: %s", podOrContainerName, err, stderr.String())
+		return "", fmt.Errorf("falha ao obter IP do pod %s: %w. Stderr: %s", podName, err, stderr.String())
 	}
 
 	ip := strings.TrimSpace(stdout.String())
 	if ip == "" {
-		return "", fmt.Errorf("não foi possível obter IP do pod %s", podOrContainerName)
+		return "", fmt.Errorf("não foi possível obter IP do pod %s", podName)
 	}
 
 	return ip, nil
 }
 
-func (r KubernetesRuntime) CopyToContainer(srcPath, podOrContainerName, namespace, destPath string) error {
-	srcPath = filepath.ToSlash(srcPath)
-	destDir := path.Dir(destPath)
-	tmpName := filepath.Base(destPath) + ".tmp"
+func (r KubernetesRuntime) CopyToContainer(src, podName, containerName, namespace, dst string) error {
+	if podName == "" {
+		return fmt.Errorf("nome do pod deve ser informado")
+	}
+
+	src = filepath.ToSlash(src)
+	destDir := path.Dir(dst)
+	tmpName := filepath.Base(dst) + ".tmp"
 	tmpDestPath := path.Join(destDir, tmpName)
 
 	// Copia o arquivo para o container com nome temporário
-	copyArgs := addNamespaceArg(namespace, []string{"cp", srcPath, fmt.Sprintf("%s:%s", podOrContainerName, tmpDestPath)})
+	copyArgs := []string{"cp", src, fmt.Sprintf("%s:%s", podName, tmpDestPath)}
+	if containerName != "" {
+		copyArgs = append(copyArgs, "-c", containerName)
+	}
+	copyArgs = addNamespaceArg(namespace, copyArgs)
 	copyCmd := r.buildKubectlCmd(false, copyArgs...)
 	copyCmd.Stdout = os.Stdout
 	copyCmd.Stderr = os.Stderr
@@ -436,7 +460,12 @@ func (r KubernetesRuntime) CopyToContainer(srcPath, podOrContainerName, namespac
 	}
 
 	// Move o arquivo dentro do container (rename atômico)
-	mvArgs := addNamespaceArg(namespace, []string{"exec", podOrContainerName, "--", "mv", "-f", tmpDestPath, destPath})
+	mvArgs := []string{"exec", podName}
+	if containerName != "" {
+		mvArgs = append(mvArgs, "-c", containerName)
+	}
+	mvArgs = append(mvArgs, "--", "mv", "-f", tmpDestPath, dst)
+	mvArgs = addNamespaceArg(namespace, mvArgs)
 	mvCmd := r.buildKubectlCmd(false, mvArgs...)
 	mvCmd.Stdout = os.Stdout
 	mvCmd.Stderr = os.Stderr
@@ -447,8 +476,16 @@ func (r KubernetesRuntime) CopyToContainer(srcPath, podOrContainerName, namespac
 	return nil
 }
 
-func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, namespace, dst string) error {
-	args := addNamespaceArg(namespace, []string{"cp", fmt.Sprintf("%s:%s", podOrContainerName, src), dst})
+func (r KubernetesRuntime) CopyToHost(src, podName, containerName, namespace, dst string) error {
+	if podName == "" {
+		return fmt.Errorf("nome do pod deve ser informado")
+	}
+
+	args := []string{"cp", fmt.Sprintf("%s:%s", podName, src), dst}
+	if containerName != "" {
+		args = append(args, "-c", containerName)
+	}
+	args = addNamespaceArg(namespace, args)
 	cmd := r.buildKubectlCmd(false, args...)
 
 	// Cria buffers separados para stdout e stderr
@@ -465,19 +502,26 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, namespace, dst st
 	return nil
 }
 
-func (r KubernetesRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, namespace string) (bool, error) {
+func (r KubernetesRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podName, containerName, namespace string) (bool, error) {
 	timeoutChan := time.After(timeout)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	if podName == "" {
+		return false, fmt.Errorf("nome do pod deve ser informado")
+	}
 
 	for {
 		select {
 		case <-timeoutChan:
-			return false, fmt.Errorf("timeout esperando arquivo %s aparecer no pod %s", fileName, podOrContainerName)
+			target := podName
+			if containerName != "" {
+				target = fmt.Sprintf("%s/%s", podName, containerName)
+			}
+			return false, fmt.Errorf("timeout esperando arquivo %s aparecer no pod %s", fileName, target)
 		case <-ticker.C:
-			running, _ := r.IsContainerRunning(podOrContainerName, namespace)
+			running, _ := r.IsContainerRunning(podName, namespace)
 			if running {
-				_, err := r.ExecInContainer(podOrContainerName, namespace, []string{"test", "-f", fileName})
+				_, err := r.ExecInContainer(podName, containerName, namespace, []string{"test", "-f", fileName})
 				if err == nil {
 					return true, nil
 				}
