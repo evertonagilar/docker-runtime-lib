@@ -31,6 +31,13 @@ func NewDockerRuntimeFactory(config TContainerRuntimeConfig) (TContainerRuntime,
 	return DockerRuntime{config: config}, nil
 }
 
+func ensureMainContainerNameEmpty(mainContainerName string) error {
+	if mainContainerName != "" {
+		return fmt.Errorf("mainContainerName não é suportado para Docker runtime")
+	}
+	return nil
+}
+
 func (r DockerRuntime) buildDockerArgs(args ...string) []string {
 	finalArgs := []string{}
 	if r.config.RemoteHost != "" {
@@ -62,14 +69,14 @@ func (r DockerRuntime) buildDockerCmd(captureOutput bool, args ...string) *exec.
 	return cmd
 }
 
-func (r DockerRuntime) Up(podName, namespace, manifestFile string, waitContainerRunning bool) error {
+func (r DockerRuntime) Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error {
 	cmd := r.buildDockerCmd(false, "compose", "-f", manifestFile, "up", "-d")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao executar docker-compose up: %w", err)
 	}
 
 	if waitContainerRunning {
-		if err := r.WaitContainerRunning(podName, namespace, 60*time.Second); err != nil {
+		if err := r.WaitContainerRunning(podOrContainerName, namespace, 60*time.Second); err != nil {
 			return fmt.Errorf("container não subiu corretamente: %w", err)
 		}
 	}
@@ -77,9 +84,12 @@ func (r DockerRuntime) Up(podName, namespace, manifestFile string, waitContainer
 	return nil
 }
 
-func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podName, containerName, storageClass string) error {
+func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, mainContainerName, storageClass string) error {
 	_ = namespace
 	_ = storageClass
+	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
+		return err
+	}
 	args := []string{"run"}
 
 	if runtime.GOOS != "windows" {
@@ -104,12 +114,8 @@ func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, vo
 	if chDir != "" {
 		args = append(args, "-w", chDir)
 	}
-	targetName := podName
-	if targetName == "" {
-		targetName = containerName
-	}
-	if targetName != "" {
-		args = append(args, "--name", targetName)
+	if podOrContainerName != "" {
+		args = append(args, "--name", podOrContainerName)
 	}
 	args = append(args, otherOptionsList...)
 	args = append(args, image)
@@ -128,12 +134,12 @@ func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, vo
 	return cmd.Run()
 }
 
-func (r DockerRuntime) Down(podName, _ string, force bool) error {
+func (r DockerRuntime) Down(podOrContainerName, _ string, force bool) error {
 	args := []string{"rm"}
 	if force {
 		args = append(args, "--force")
 	}
-	args = append(args, podName)
+	args = append(args, podOrContainerName)
 
 	stopCmd := r.buildDockerCmd(false, args...)
 	if err := stopCmd.Run(); err != nil {
@@ -143,12 +149,12 @@ func (r DockerRuntime) Down(podName, _ string, force bool) error {
 	return nil
 }
 
-func (r DockerRuntime) CopyToContainer(src, podName, containerName, namespace, dst string) error {
+func (r DockerRuntime) CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error {
 	_ = namespace
-	targetName := containerName
-	if targetName == "" {
-		targetName = podName
+	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
+		return err
 	}
+	targetName := podOrContainerName
 	if targetName == "" {
 		return fmt.Errorf("nome do container não informado")
 	}
@@ -171,12 +177,12 @@ func (r DockerRuntime) CopyToContainer(src, podName, containerName, namespace, d
 	return nil
 }
 
-func (r DockerRuntime) CopyToHost(src, podName, containerName, namespace, dst string) error {
+func (r DockerRuntime) CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error {
 	_ = namespace
-	targetName := containerName
-	if targetName == "" {
-		targetName = podName
+	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
+		return err
 	}
+	targetName := podOrContainerName
 	if targetName == "" {
 		return fmt.Errorf("nome do container não informado")
 	}
@@ -189,14 +195,14 @@ func (r DockerRuntime) CopyToHost(src, podName, containerName, namespace, dst st
 	return nil
 }
 
-func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podName, containerName, namespace string) (bool, error) {
+func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error) {
+	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
+		return false, err
+	}
 	timeoutChan := time.After(timeout)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	targetName := podName
-	if targetName == "" {
-		targetName = containerName
-	}
+	targetName := podOrContainerName
 	if targetName == "" {
 		return false, fmt.Errorf("nome do container não informado")
 	}
@@ -207,7 +213,7 @@ func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, inter
 		case <-ticker.C:
 			running, _ := r.IsContainerRunning(targetName, namespace)
 			if running {
-				_, err := r.ExecInContainer(podName, containerName, namespace, []string{"/usr/bin/test", "-f", fileName})
+				_, err := r.ExecInContainer(podOrContainerName, mainContainerName, namespace, []string{"/usr/bin/test", "-f", fileName})
 				if err == nil {
 					return true, nil
 				}
@@ -218,9 +224,9 @@ func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, inter
 	}
 }
 
-func (r DockerRuntime) GetContainerStatus(podName, namespace string) (ContainerStatus, error) {
+func (r DockerRuntime) GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error) {
 	_ = namespace
-	cmd := r.buildDockerCmd(true, "inspect", "-f", "{{.State.Status}}", podName)
+	cmd := r.buildDockerCmd(true, "inspect", "-f", "{{.State.Status}}", podOrContainerName)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -231,7 +237,7 @@ func (r DockerRuntime) GetContainerStatus(podName, namespace string) (ContainerS
 		if strings.Contains(stderrStr, "No such object") || strings.Contains(stderrStr, "Error: No such container") {
 			return ContainerStatusNotFound, nil
 		}
-		return ContainerStatusUnknown, fmt.Errorf("erro ao inspecionar container %s: %w. Stderr: %s", podName, err, stderrStr)
+		return ContainerStatusUnknown, fmt.Errorf("erro ao inspecionar container %s: %w. Stderr: %s", podOrContainerName, err, stderrStr)
 	}
 
 	switch strings.TrimSpace(stdout.String()) {
@@ -248,23 +254,23 @@ func (r DockerRuntime) GetContainerStatus(podName, namespace string) (ContainerS
 	}
 }
 
-func (r DockerRuntime) IsContainerRunning(podName, namespace string) (bool, error) {
-	status, err := r.GetContainerStatus(podName, namespace)
+func (r DockerRuntime) IsContainerRunning(podOrContainerName, namespace string) (bool, error) {
+	status, err := r.GetContainerStatus(podOrContainerName, namespace)
 	if err != nil {
 		return false, err
 	}
 	return status == ContainerStatusRunning, nil
 }
 
-func (r DockerRuntime) WaitContainerRunning(podName, namespace string, timeout time.Duration) error {
+func (r DockerRuntime) WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error {
 	timeoutChan := time.After(timeout)
 	tick := time.Tick(1 * time.Second)
 	for {
 		select {
 		case <-timeoutChan:
-			return fmt.Errorf("timeout esperando container %s subir", podName)
+			return fmt.Errorf("timeout esperando container %s subir", podOrContainerName)
 		case <-tick:
-			running, _ := r.IsContainerRunning(podName, namespace)
+			running, _ := r.IsContainerRunning(podOrContainerName, namespace)
 			if running {
 				return nil
 			}
@@ -272,30 +278,31 @@ func (r DockerRuntime) WaitContainerRunning(podName, namespace string, timeout t
 	}
 }
 
-func (r DockerRuntime) StopContainer(podName, namespace string) error {
+func (r DockerRuntime) StopContainer(podOrContainerName, namespace string) error {
 	_ = namespace
-	cmd := r.buildDockerCmd(false, "stop", podName)
+	cmd := r.buildDockerCmd(false, "stop", podOrContainerName)
 	return cmd.Run()
 }
 
-func (r DockerRuntime) ShowLogs(podName, containerName, namespace string) error {
+func (r DockerRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string) error {
 	_ = namespace
-	_ = containerName
-	cmd := r.buildDockerCmd(false, "logs", "-f", podName)
-	return cmd.Run()
-}
-
-func (r DockerRuntime) ExecInContainer(podName, containerName, namespace string, cmdArgs []string) ([]byte, error) {
-	_ = namespace
-	targetName := podName
-	if targetName == "" {
-		targetName = containerName
+	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
+		return err
 	}
-	if targetName == "" {
+	cmd := r.buildDockerCmd(false, "logs", "-f", podOrContainerName)
+	return cmd.Run()
+}
+
+func (r DockerRuntime) ExecInContainer(podOrContainerName, mainContainerName, namespace string, cmdArgs []string) ([]byte, error) {
+	_ = namespace
+	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
+		return nil, err
+	}
+	if podOrContainerName == "" {
 		return nil, fmt.Errorf("nome do container não informado")
 	}
 
-	args := append([]string{"exec", targetName}, cmdArgs...)
+	args := append([]string{"exec", podOrContainerName}, cmdArgs...)
 	cmd := r.buildDockerCmd(true, args...)
 
 	var stdout, stderr bytes.Buffer
@@ -309,21 +316,21 @@ func (r DockerRuntime) ExecInContainer(podName, containerName, namespace string,
 	return stdout.Bytes(), nil
 }
 
-func (r DockerRuntime) GetContainerIP(podName, namespace string) (string, error) {
+func (r DockerRuntime) GetContainerIP(podOrContainerName, namespace string) (string, error) {
 	_ = namespace
-	cmd := r.buildDockerCmd(true, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", podName)
+	cmd := r.buildDockerCmd(true, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", podOrContainerName)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("falha ao inspecionar container %s: %w. Stderr: %s", podName, err, stderr.String())
+		return "", fmt.Errorf("falha ao inspecionar container %s: %w. Stderr: %s", podOrContainerName, err, stderr.String())
 	}
 
 	ip := strings.TrimSpace(stdout.String())
 	if ip == "" {
-		return "", fmt.Errorf("não foi possível obter IP do container %s", podName)
+		return "", fmt.Errorf("não foi possível obter IP do container %s", podOrContainerName)
 	}
 
 	return ip, nil
@@ -397,6 +404,10 @@ func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, gateway, labe
 // Só existe para Kubernetes, então retorna vazio
 func (r DockerRuntime) GetStorageClassList() ([]TStorageClass, error) {
 	return []TStorageClass{}, nil
+}
+
+func (r DockerRuntime) GetClusterApiServerHost() string {
+	return r.config.RemoteHost
 }
 
 // -------------------- Auxiliares --------------------

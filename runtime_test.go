@@ -136,7 +136,7 @@ func TestCopyToContainer(t *testing.T) {
 
 	// Copia para dentro do container
 	destPath := "/usr/share/nginx/html/index.html"
-	if err := r.CopyToContainer(tmpFile, "", containerName, "", destPath); err != nil {
+	if err := r.CopyToContainer(tmpFile, containerName, "", "", destPath); err != nil {
 		t.Fatalf("falha ao copiar arquivo para container: %v", err)
 	}
 	t.Logf("✅ Arquivo copiado para %s dentro do container", destPath)

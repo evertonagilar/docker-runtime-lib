@@ -54,26 +54,27 @@ type TStorageClass struct {
 }
 
 type TContainerRuntime interface {
-	Up(podName, namespace, manifestFile string, waitContainerRunning bool) error
-	Down(podName, namespace string, force bool) error
-	GetContainerStatus(podName, namespace string) (ContainerStatus, error)
-	IsContainerRunning(podName, namespace string) (bool, error)
-	WaitContainerRunning(podName, namespace string, timeout time.Duration) error
-	StopContainer(podName, namespace string) error
-	ShowLogs(podName, containerName, namespace string) error
+	Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
+	Down(podOrContainerName, namespace string, force bool) error
+	GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error)
+	IsContainerRunning(podOrContainerName, namespace string) (bool, error)
+	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
+	StopContainer(podOrContainerName, namespace string) error
+	ShowLogs(podOrContainerName, mainContainerName, namespace string) error
 	Run(cmdStr, entrypoint, chDir, image, uid, gid string,
 		volumes []TVolume, otherOptionsList []string, namespace,
-		podName, containerName, storageClass string) error
-	ExecInContainer(podName, containerName, namespace string, cmd []string) ([]byte, error)
-	GetContainerIP(podName, namespace string) (string, error)
+		podOrContainerName, mainContainerName, storageClass string) error
+	ExecInContainer(podOrContainerName, mainContainerName, namespace string, cmd []string) ([]byte, error)
+	GetContainerIP(podOrContainerName, namespace string) (string, error)
 	CreateNetwork(networkName, subnet, ipRange, gateway, label string) error
 	CreateVolume(volumeName string) error
 	IsVolumeExist(volumeName string) bool
 	IsNetworkExist(networkName string) bool
-	CopyToContainer(src, podName, containerName, namespace, dst string) error
-	CopyToHost(src, podName, containerName, namespace, dst string) error
-	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podName, containerName, namespace string) (bool, error)
+	CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error
+	CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error
+	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error)
 	GetStorageClassList() ([]TStorageClass, error)
+	GetClusterApiServerHost() string
 }
 
 func NewDockerRuntime(config TContainerRuntimeConfig) (TContainerRuntime, error) {
