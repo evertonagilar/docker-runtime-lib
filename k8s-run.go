@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -55,6 +56,8 @@ func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string
 	}
 
 	cmd := r.buildKubectlCmdWithContext(ctx, false, kubectlArgs...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
 	}

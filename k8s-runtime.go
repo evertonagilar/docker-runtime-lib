@@ -111,6 +111,8 @@ func addNamespaceArg(namespace string, args []string) []string {
 func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error {
 	args := addNamespaceArg(namespace, []string{"apply", "-f", manifestFile})
 	cmd := r.buildKubectlCmd(false, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
 	}
