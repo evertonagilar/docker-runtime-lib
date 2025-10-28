@@ -84,6 +84,34 @@ func (r DockerRuntime) Up(podOrContainerName, namespace, manifestFile string, wa
 	return nil
 }
 
+func (r DockerRuntime) ApplyReplay(namespace, manifestFile string, force bool) error {
+	_ = namespace
+	args := []string{"compose", "-f", manifestFile, "up", "-d"}
+	if force {
+		args = append(args, "--force-recreate", "--remove-orphans")
+	}
+
+	cmd := r.buildDockerCmd(false, args...)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("erro ao aplicar manifesto docker-compose: %w", err)
+	}
+	return nil
+}
+
+func (r DockerRuntime) Delete(namespace, manifestFile string, force bool) error {
+	_ = namespace
+	args := []string{"compose", "-f", manifestFile, "down"}
+	if force {
+		args = append(args, "--volumes", "--remove-orphans")
+	}
+
+	cmd := r.buildDockerCmd(false, args...)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("erro ao remover manifesto docker-compose: %w", err)
+	}
+	return nil
+}
+
 func (r DockerRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, mainContainerName, storageClass string) error {
 	_ = namespace
 	_ = storageClass

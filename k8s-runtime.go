@@ -126,6 +126,46 @@ func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string
 	return nil
 }
 
+func (r KubernetesRuntime) ApplyReplay(namespace, manifestFile string, force bool) error {
+	if force {
+		deleteArgs := addNamespaceArg(namespace, []string{"delete", "-f", manifestFile, "--ignore-not-found"})
+		deleteArgs = append(deleteArgs, "--grace-period=0", "--force")
+		deleteCmd := r.buildKubectlCmd(false, deleteArgs...)
+		deleteCmd.Stdout = io.Discard
+		deleteCmd.Stderr = io.Discard
+		if err := deleteCmd.Run(); err != nil {
+			return fmt.Errorf("erro ao forçar reaplicação do manifesto: %w", err)
+		}
+	}
+
+	args := addNamespaceArg(namespace, []string{"apply", "-f", manifestFile})
+	cmd := r.buildKubectlCmd(false, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
+	}
+	return nil
+}
+
+func (r KubernetesRuntime) Delete(namespace, manifestFile string, force bool) error {
+	args := []string{"delete", "-f", manifestFile, "--ignore-not-found"}
+	if force {
+		args = append(args, "--grace-period=0", "--force")
+	}
+	args = addNamespaceArg(namespace, args)
+
+	cmd := r.buildKubectlCmd(false, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("erro ao deletar manifesto: %w", err)
+	}
+	return nil
+}
+
 func (r KubernetesRuntime) Down(podOrContainerName, namespace string, force bool) error {
 	deletePodArgs := []string{"delete", "pod", podOrContainerName, "--ignore-not-found"}
 	if force {

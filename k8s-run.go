@@ -1,10 +1,13 @@
 package container
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -110,6 +113,9 @@ func extractRunSettings(defaultNamespace, defaultPod string, options []string) r
 func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName string) ([]byte, error) {
 	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumes, storageClass, podName, containerName)
 	if err != nil {
+		return nil, err
+	}
+	if err := ensurePersistentVolumeClaimRefCleared(data.PersistentVolumes); err != nil {
 		return nil, err
 	}
 
@@ -244,6 +250,68 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 	}, nil
 }
 
+func ensurePersistentVolumeClaimRefCleared(volumes []volumeEntry) error {
+	for _, volume := range volumes {
+		if volume.PersistentVolumeName == "" {
+			continue
+		}
+		if err := cleanupReleasedPersistentVolume(volume.PersistentVolumeName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanupReleasedPersistentVolume(pvName string) error {
+	kubectlPath, err := getKubectlBinPath()
+	if err != nil {
+		// Sem kubectl disponível não há como consultar/atualizar o PV.
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(kubectlPath, "get", "pv", pvName, "-o", "json")
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		// PV inexistente ou cluster inacessível – continuar sem falhar.
+		return nil
+	}
+
+	var info struct {
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+		Spec struct {
+			ClaimRef *json.RawMessage `json:"claimRef"`
+		} `json:"spec"`
+	}
+
+	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+		return fmt.Errorf("erro ao analisar dados do PV %s: %w", pvName, err)
+	}
+
+	if !strings.EqualFold(info.Status.Phase, "Released") || info.Spec.ClaimRef == nil {
+		return nil
+	}
+
+	patchPayload := `[{"op":"remove","path":"/spec/claimRef"}]`
+	var patchStderr bytes.Buffer
+	patchCmd := exec.Command(kubectlPath, "patch", "pv", pvName, "--type=json", "-p", patchPayload)
+	patchCmd.Stdout = io.Discard
+	patchCmd.Stderr = &patchStderr
+	if err := patchCmd.Run(); err != nil {
+		msg := strings.TrimSpace(patchStderr.String())
+		if strings.Contains(msg, "jsonpatch remove operation does not apply") {
+			// claimRef já removido por outra rotina – seguir em frente.
+			return nil
+		}
+		return fmt.Errorf("erro ao limpar claimRef do PV %s: %s", pvName, msg)
+	}
+
+	return nil
+}
+
 func formatList(items []string) string {
 	return fmt.Sprintf("[%s]", strings.Join(QuoteList(items), ", "))
 }
@@ -301,7 +369,7 @@ spec:
 {{- if .StorageClass }}
   storageClassName: {{.StorageClass}}
 {{- end }}
-  persistentVolumeReclaimPolicy: Retain
+  persistentVolumeReclaimPolicy: Delete
   hostPath:
     path: {{.HostPath}}
     type: DirectoryOrCreate
