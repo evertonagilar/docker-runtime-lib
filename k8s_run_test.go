@@ -145,3 +145,45 @@ func TestGenerateManifestWithDynamicProvisioning(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateManifestWithInMemoryVolume(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	volumes := []TVolume{
+		{
+			MountPath: "/mnt/in-memory",
+			InMemory:  true,
+		},
+	}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippets := []string{
+		"emptyDir:",
+		"medium: Memory",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+
+	unexpectedSnippets := []string{
+		"hostPath:",
+		"persistentVolumeClaim:",
+	}
+
+	for _, snippet := range unexpectedSnippets {
+		if strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não deveria conter trecho: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}

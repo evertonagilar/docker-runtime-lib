@@ -34,6 +34,7 @@ type TVolume struct {
     ReadOnly     bool
     Size         string
     StorageClass string
+    InMemory     bool
 }
 ```
 

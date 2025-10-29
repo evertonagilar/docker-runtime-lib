@@ -45,6 +45,7 @@ type TVolume struct {
 	ReadOnly     bool
 	Size         string
 	StorageClass string
+	InMemory     bool // para Kubernetes usa EmptyDir e medium=Memory
 }
 
 type TStorageClass struct {

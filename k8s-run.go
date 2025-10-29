@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
@@ -159,6 +158,8 @@ type volumeEntry struct {
 	HostPath                  string
 	ReadOnly                  bool
 	IsPersistent              bool
+	IsEmptyDir                bool
+	EmptyDirMedium            string
 	StorageClass              string
 	PersistentVolumeSize      string
 	PersistentVolumeName      string
@@ -194,10 +195,15 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 		}
 
 		if volume.MountPath == "" {
-			return manifestData{}, fmt.Errorf("volume inválido: mountPath é obrigatório")
+			return manifestData{}, fmt.Errorf("volume %s inválido: mountPath é obrigatório", volume.MountPath)
 		}
-		if volume.HostPath == "" && effectiveStorageClass == "" {
-			return manifestData{}, fmt.Errorf("volume inválido: hostPath é obrigatório quando storageClass não é informado")
+		if volume.InMemory {
+			if volume.HostPath != "" {
+				return manifestData{}, fmt.Errorf("volume %s inválido: hostPath não é suportado para volumes inMemory", volume.MountPath)
+			}
+		}
+		if volume.HostPath == "" && effectiveStorageClass == "" && !volume.InMemory {
+			return manifestData{}, fmt.Errorf("volume %s inválido: hostPath é obrigatório quando storageClass não é informado", volume.MountPath)
 		}
 
 		entry := volumeEntry{
@@ -206,25 +212,29 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 			ReadOnly:  volume.ReadOnly,
 		}
 
-		if volume.HostPath != "" {
-			entry.HostPath = filepath.Join("/sigctl", volume.HostPath)
-		}
-
-		if effectiveStorageClass != "" {
-			entry.IsPersistent = true
-			entry.StorageClass = effectiveStorageClass
-			entry.PersistentVolumeClaimName = fmt.Sprintf("%s-pvc-%d", baseName, idx)
+		if volume.InMemory {
+			entry.IsEmptyDir = true
+			entry.EmptyDirMedium = "Memory"
+		} else {
 			if volume.HostPath != "" {
-				entry.PersistentVolumeName = fmt.Sprintf("%s-pv-%d", baseName, idx)
+				entry.HostPath = volume.HostPath
 			}
-			size := volume.Size
-			if size == "" {
-				size = defaultPersistentVolumeSize
-			}
-			entry.PersistentVolumeSize = size
-			persistentVolumes = append(persistentVolumes, entry)
-		}
 
+			if effectiveStorageClass != "" {
+				entry.IsPersistent = true
+				entry.StorageClass = effectiveStorageClass
+				entry.PersistentVolumeClaimName = fmt.Sprintf("%s-pvc-%d", baseName, idx)
+				if volume.HostPath != "" {
+					entry.PersistentVolumeName = fmt.Sprintf("%s-pv-%d", baseName, idx)
+				}
+				size := volume.Size
+				if size == "" {
+					size = defaultPersistentVolumeSize
+				}
+				entry.PersistentVolumeSize = size
+				persistentVolumes = append(persistentVolumes, entry)
+			}
+		}
 		volumeEntries = append(volumeEntries, entry)
 	}
 
@@ -436,6 +446,11 @@ spec:
 {{- if .IsPersistent }}
       persistentVolumeClaim:
         claimName: {{.PersistentVolumeClaimName}}
+{{- else if .IsEmptyDir }}
+      emptyDir:
+{{- if .EmptyDirMedium }}
+        medium: {{.EmptyDirMedium}}
+{{- end }}
 {{- else }}
       hostPath:
         path: {{.HostPath}}
