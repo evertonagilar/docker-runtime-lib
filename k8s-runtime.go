@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -791,8 +793,113 @@ func (r KubernetesRuntime) GetClusterApiServerHost() string {
 	}
 
 	host := strings.TrimSpace(parsed.Hostname())
+	portStr := strings.TrimSpace(parsed.Port())
+
 	if host == "" {
 		host = strings.TrimSpace(parsed.Host)
+		if host == "" {
+			return ""
+		}
+		if portStr == "" {
+			if splitHost, splitPort, err := net.SplitHostPort(host); err == nil {
+				host = splitHost
+				portStr = splitPort
+			}
+		}
 	}
+
+	if portStr != "" && isLoopbackHost(host) {
+		if port, err := strconv.Atoi(portStr); err == nil && port >= 30000 {
+			if primaryIP := detectPrimaryIPv4(); primaryIP != "" {
+				host = primaryIP
+			}
+		}
+	}
+
 	return host
+}
+
+func detectPrimaryIPv4() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	var fallback string
+
+	for _, iface := range interfaces {
+		if (iface.Flags&net.FlagUp) == 0 || (iface.Flags&net.FlagLoopback) != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipv4 := extractIPv4(addr)
+			if ipv4 == nil {
+				continue
+			}
+
+			if isPrivateIPv4(ipv4) {
+				return ipv4.String()
+			}
+
+			if fallback == "" {
+				fallback = ipv4.String()
+			}
+		}
+	}
+
+	return fallback
+}
+
+func extractIPv4(addr net.Addr) net.IP {
+	switch v := addr.(type) {
+	case *net.IPNet:
+		return v.IP.To4()
+	case *net.IPAddr:
+		return v.IP.To4()
+	default:
+		return nil
+	}
+}
+
+func isPrivateIPv4(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	ip = ip.To4()
+	if ip == nil {
+		return false
+	}
+
+	switch {
+	case ip[0] == 10:
+		return true
+	case ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31:
+		return true
+	case ip[0] == 192 && ip[1] == 168:
+		return true
+	default:
+		return false
+	}
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") || host == "127.0.0.1" {
+		return true
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+
+	return false
 }
