@@ -84,7 +84,7 @@ func (r DockerRuntime) Up(podOrContainerName, namespace, manifestFile string, wa
 	return nil
 }
 
-func (r DockerRuntime) ApplyReplay(namespace, manifestFile string, force bool) error {
+func (r DockerRuntime) Apply(namespace, manifestFile string, force bool) error {
 	_ = namespace
 	args := []string{"compose", "-f", manifestFile, "up", "-d"}
 	if force {

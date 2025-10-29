@@ -126,7 +126,7 @@ func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string
 	return nil
 }
 
-func (r KubernetesRuntime) ApplyReplay(namespace, manifestFile string, force bool) error {
+func (r KubernetesRuntime) Apply(namespace, manifestFile string, force bool) error {
 	if force {
 		deleteArgs := addNamespaceArg(namespace, []string{"delete", "-f", manifestFile, "--ignore-not-found"})
 		deleteArgs = append(deleteArgs, "--grace-period=0", "--force")

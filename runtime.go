@@ -56,7 +56,7 @@ type TStorageClass struct {
 type TContainerRuntime interface {
 	Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
 	Down(podOrContainerName, namespace string, force bool) error
-	ApplyReplay(namespace, manifestFile string, force bool) error
+	Apply(namespace, manifestFile string, force bool) error
 	Delete(namespace, manifestFile string, force bool) error
 	GetContainerStatus(podOrContainerName, namespace string) (ContainerStatus, error)
 	IsContainerRunning(podOrContainerName, namespace string) (bool, error)
