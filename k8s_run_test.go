@@ -15,7 +15,7 @@ func TestGenerateManifestNoVolumes(t *testing.T) {
 
 	command := []string{"/bin/bash", "-c", "echo hello"}
 
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestGenerateManifestWithVolumes(t *testing.T) {
 			ReadOnly:  true,
 		},
 	}
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestGenerateManifestWithVolumes(t *testing.T) {
 		"- name: vol-0",
 		"mountPath: /mnt/data",
 		"readOnly: true",
-		"path: /sigctl/data",
+		"path: data",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -80,7 +80,7 @@ func TestGenerateManifestWithStorageClass(t *testing.T) {
 			MountPath: "/mnt/storage",
 		},
 	}
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "fast-storage", "demo-run", "")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "fast-storage", "demo-run", "", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestGenerateManifestWithDynamicProvisioning(t *testing.T) {
 			StorageClass: "fast-storage",
 		},
 	}
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "dynamic-run", "")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "dynamic-run", "", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestGenerateManifestWithInMemoryVolume(t *testing.T) {
 		},
 	}
 
-	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "")
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "", "")
 	if err != nil {
 		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
 	}
@@ -185,5 +185,23 @@ func TestGenerateManifestWithInMemoryVolume(t *testing.T) {
 		if strings.Contains(output, snippet) {
 			t.Fatalf("manifesto não deveria conter trecho: %q\nManifesto:\n%s", snippet, output)
 		}
+	}
+}
+
+func TestGenerateManifestWithImagePullSecret(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "", "my-secret")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippet := "imagePullSecrets:\n    - name: my-secret"
+	if !strings.Contains(output, expectedSnippet) {
+		t.Fatalf("manifesto não contém imagePullSecrets com secret informado. Manifesto:\n%s", output)
 	}
 }

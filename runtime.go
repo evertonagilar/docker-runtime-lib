@@ -21,22 +21,23 @@ const (
 )
 
 type TContainerRuntimeConfig struct {
-	Image          string
-	PodName        string
-	Namespace      string
-	Env            []string
-	Volumes        []TVolume
-	Ports          map[string]string // ex: {"8080/tcp": "8080", "8787/tcp": "8787"}
-	NetworkName    string
-	RemoteHost     string
-	TLSCaCertPath  string
-	TLSCertPath    string
-	TLSKeyPath     string
-	MemoryLimitMB  int
-	CpuLimit       float64
-	CommandBinPath string
-	Workspace      string
-	Debug          bool
+	Image               string
+	PodName             string
+	Namespace           string
+	Env                 []string
+	Volumes             []TVolume
+	Ports               map[string]string // ex: {"8080/tcp": "8080", "8787/tcp": "8787"}
+	NetworkName         string
+	RemoteHost          string
+	TLSCaCertPath       string
+	TLSCertPath         string
+	TLSKeyPath          string
+	MemoryLimitMB       int
+	CpuLimit            float64
+	CommandBinPath      string
+	Workspace           string
+	Debug               bool
+	ImagePullSecretName string
 }
 
 type TVolume struct {

@@ -33,7 +33,7 @@ func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string
 	}
 	commandSequence := []string{entrypoint, "-c", cmdStr}
 
-	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumes, storageClass, podName, containerName)
+	manifest, err := generateManifest(runCfg, image, chDir, commandSequence, envs, volumes, storageClass, podName, containerName, r.config.ImagePullSecretName)
 	if err != nil {
 		return fmt.Errorf("erro ao gerar manifesto: %w", err)
 	}
@@ -109,8 +109,8 @@ func extractRunSettings(defaultNamespace, defaultPod string, options []string) r
 	return cfg
 }
 
-func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName string) ([]byte, error) {
-	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumes, storageClass, podName, containerName)
+func generateManifest(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName, imagePullSecretName string) ([]byte, error) {
+	data, err := buildManifestData(runCfg, image, workingDir, command, envs, volumes, storageClass, podName, containerName, imagePullSecretName)
 	if err != nil {
 		return nil, err
 	}
@@ -136,15 +136,16 @@ func generateManifest(runCfg runSettings, image, workingDir string, command []st
 const defaultPersistentVolumeSize = "5Gi"
 
 type manifestData struct {
-	Namespace         string
-	PodName           string
-	ContainerName     string
-	Image             string
-	WorkingDir        string
-	Command           []string
-	Env               []envEntry
-	Volumes           []volumeEntry
-	PersistentVolumes []volumeEntry
+	Namespace           string
+	PodName             string
+	ContainerName       string
+	Image               string
+	WorkingDir          string
+	Command             []string
+	Env                 []envEntry
+	Volumes             []volumeEntry
+	PersistentVolumes   []volumeEntry
+	ImagePullSecretName string
 }
 
 type envEntry struct {
@@ -166,7 +167,7 @@ type volumeEntry struct {
 	PersistentVolumeClaimName string
 }
 
-func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName string) (manifestData, error) {
+func buildManifestData(runCfg runSettings, image, workingDir string, command []string, envs map[string]string, volumes []TVolume, storageClass, podName, containerName, imagePullSecretName string) (manifestData, error) {
 	envEntries := make([]envEntry, 0, len(envs))
 	keys := make([]string, 0, len(envs))
 	for k := range envs {
@@ -248,15 +249,16 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 	}
 
 	return manifestData{
-		Namespace:         runCfg.Namespace,
-		PodName:           runCfg.PodName,
-		ContainerName:     effectiveContainerName,
-		Image:             image,
-		WorkingDir:        workingDir,
-		Command:           command,
-		Env:               envEntries,
-		Volumes:           volumeEntries,
-		PersistentVolumes: persistentVolumes,
+		Namespace:           runCfg.Namespace,
+		PodName:             runCfg.PodName,
+		ContainerName:       effectiveContainerName,
+		Image:               image,
+		WorkingDir:          workingDir,
+		Command:             command,
+		Env:                 envEntries,
+		Volumes:             volumeEntries,
+		PersistentVolumes:   persistentVolumes,
+		ImagePullSecretName: imagePullSecretName,
 	}, nil
 }
 
@@ -415,6 +417,10 @@ metadata:
 spec:
   restartPolicy: Never
   terminationGracePeriodSeconds: 0
+{{- if .ImagePullSecretName }}
+  imagePullSecrets:
+    - name: {{.ImagePullSecretName}}
+{{- end }}
   containers:
     - name: {{.ContainerName}}
       image: {{.Image}}
