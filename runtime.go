@@ -38,6 +38,7 @@ type TContainerRuntimeConfig struct {
 	Workspace           string
 	Debug               bool
 	ImagePullSecretName string
+	Kubeconfig          string
 }
 
 type TVolume struct {

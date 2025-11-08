@@ -78,6 +78,9 @@ func getKubectlBinPath() (string, error) {
 
 func (r KubernetesRuntime) buildKubectlArgs(args ...string) []string {
 	finalArgs := []string{}
+	if strings.TrimSpace(r.config.Kubeconfig) != "" {
+		finalArgs = append(finalArgs, "--kubeconfig", strings.TrimSpace(r.config.Kubeconfig))
+	}
 	// Suporte futuro a context, namespace, etc.
 	finalArgs = append(finalArgs, args...)
 	return finalArgs
