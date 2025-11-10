@@ -57,11 +57,9 @@ func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string
 		fmt.Printf("🔨 Comando kubectl: %s %s\n", r.config.CommandBinPath, strings.Join(r.buildKubectlArgs(kubectlArgs...), " "))
 	}
 
-	cmd := r.buildKubectlCmdWithContext(ctx, false, kubectlArgs...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
+	cmd := r.buildKubectlCmdWithContext(ctx, true, kubectlArgs...)
+	if err := r.runKubectlCommand(cmd, "erro ao aplicar manifesto"); err != nil {
+		return err
 	}
 
 	return nil

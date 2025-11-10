@@ -110,16 +110,53 @@ func addNamespaceArg(namespace string, args []string) []string {
 	return out
 }
 
+const kubectlOutputTailLimit = 4 * 1024
+
+func trimAndJoin(parts ...string) string {
+	trimmed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			trimmed = append(trimmed, part)
+		}
+	}
+	return strings.Join(trimmed, "\n")
+}
+
+func (r KubernetesRuntime) runKubectlCommand(cmd *exec.Cmd, errPrefix string) error {
+	if r.config.Debug {
+		fmt.Printf("🔨 Comando kubectl: %s\n", strings.Join(cmd.Args, " "))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s: %w", errPrefix, err)
+		}
+		return nil
+	}
+
+	stdoutTail := newTailBuffer(kubectlOutputTailLimit)
+	stderrTail := newTailBuffer(kubectlOutputTailLimit)
+	cmd.Stdout = stdoutTail
+	cmd.Stderr = stderrTail
+
+	if err := cmd.Run(); err != nil {
+		if detail := trimAndJoin(stdoutTail.String(), stderrTail.String()); detail != "" {
+			return fmt.Errorf("%s (%s): %w", errPrefix, detail, err)
+		}
+		return fmt.Errorf("%s: %w", errPrefix, err)
+	}
+
+	return nil
+}
+
 // -------------------- Métodos principais --------------------
 
 // Up cria o pod/deployment a partir de um manifesto YAML
 func (r KubernetesRuntime) Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error {
 	args := addNamespaceArg(namespace, []string{"apply", "-f", manifestFile})
-	cmd := r.buildKubectlCmd(false, args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
+	cmd := r.buildKubectlCmd(true, args...)
+	if err := r.runKubectlCommand(cmd, "erro ao aplicar manifesto"); err != nil {
+		return err
 	}
 
 	if waitContainerRunning {
@@ -135,21 +172,16 @@ func (r KubernetesRuntime) Apply(namespace, manifestFile string, force bool) err
 	if force {
 		deleteArgs := addNamespaceArg(namespace, []string{"delete", "-f", manifestFile, "--ignore-not-found"})
 		deleteArgs = append(deleteArgs, "--grace-period=0", "--force")
-		deleteCmd := r.buildKubectlCmd(false, deleteArgs...)
-		deleteCmd.Stdout = io.Discard
-		deleteCmd.Stderr = io.Discard
-		if err := deleteCmd.Run(); err != nil {
-			return fmt.Errorf("erro ao forçar reaplicação do manifesto: %w", err)
+		deleteCmd := r.buildKubectlCmd(true, deleteArgs...)
+		if err := r.runKubectlCommand(deleteCmd, "erro ao forçar reaplicação do manifesto"); err != nil {
+			return err
 		}
 	}
 
 	args := addNamespaceArg(namespace, []string{"apply", "-f", manifestFile})
-	cmd := r.buildKubectlCmd(false, args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao aplicar manifesto: %w", err)
+	cmd := r.buildKubectlCmd(true, args...)
+	if err := r.runKubectlCommand(cmd, "erro ao aplicar manifesto"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -161,12 +193,9 @@ func (r KubernetesRuntime) Delete(namespace, manifestFile string, force bool) er
 	}
 	args = addNamespaceArg(namespace, args)
 
-	cmd := r.buildKubectlCmd(false, args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao deletar manifesto: %w", err)
+	cmd := r.buildKubectlCmd(true, args...)
+	if err := r.runKubectlCommand(cmd, "erro ao deletar manifesto"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -177,14 +206,14 @@ func (r KubernetesRuntime) Down(podOrContainerName, namespace string, force bool
 		deletePodArgs = append(deletePodArgs, "--grace-period", "3")
 	}
 	deletePodArgs = addNamespaceArg(namespace, deletePodArgs)
-	cmd := r.buildKubectlCmd(false, deletePodArgs...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao deletar pod %s: %w", podOrContainerName, err)
+	cmd := r.buildKubectlCmd(true, deletePodArgs...)
+	if err := r.runKubectlCommand(cmd, fmt.Sprintf("erro ao deletar pod %s", podOrContainerName)); err != nil {
+		return err
 	}
 	deleteSvcArgs := addNamespaceArg(namespace, []string{"delete", "svc", podOrContainerName, "--ignore-not-found"})
-	cmd = r.buildKubectlCmd(false, deleteSvcArgs...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao deletar svc %s: %w", podOrContainerName, err)
+	cmd = r.buildKubectlCmd(true, deleteSvcArgs...)
+	if err := r.runKubectlCommand(cmd, fmt.Sprintf("erro ao deletar svc %s", podOrContainerName)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -290,8 +319,8 @@ func (r KubernetesRuntime) WaitContainerRunning(podOrContainerName, namespace st
 
 func (r KubernetesRuntime) StopContainer(podOrContainerName, namespace string) error {
 	args := addNamespaceArg(namespace, []string{"delete", "pod", podOrContainerName})
-	cmd := r.buildKubectlCmd(false, args...)
-	return cmd.Run()
+	cmd := r.buildKubectlCmd(true, args...)
+	return r.runKubectlCommand(cmd, fmt.Sprintf("erro ao deletar pod %s", podOrContainerName))
 }
 
 func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string) error {
