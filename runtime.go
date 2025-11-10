@@ -80,6 +80,8 @@ type TContainerRuntime interface {
 	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error)
 	GetStorageClassList() ([]TStorageClass, error)
 	GetClusterApiServerHost() string
+	IsNamespaceExist(namespace string) (bool, error)
+	CreateNamespace(namespace string) error
 }
 
 func NewDockerRuntime(config TContainerRuntimeConfig) (TContainerRuntime, error) {

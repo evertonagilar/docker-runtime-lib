@@ -429,6 +429,17 @@ func (r DockerRuntime) CreateNetwork(networkName, subnet, ipRange, gateway, labe
 	return nil
 }
 
+// Namespaces não se aplicam ao Docker, então sempre retornamos sucesso
+func (r DockerRuntime) IsNamespaceExist(namespace string) (bool, error) {
+	_ = namespace
+	return true, nil
+}
+
+func (r DockerRuntime) CreateNamespace(namespace string) error {
+	_ = namespace
+	return nil
+}
+
 // Só existe para Kubernetes, então retorna vazio
 func (r DockerRuntime) GetStorageClassList() ([]TStorageClass, error) {
 	return []TStorageClass{}, nil

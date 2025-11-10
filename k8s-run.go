@@ -53,10 +53,6 @@ func (r KubernetesRuntime) Run(cmdStr, entrypoint, chDir, image, uid, gid string
 	}
 
 	kubectlArgs := addNamespaceArg(runCfg.Namespace, []string{"apply", "-f", tmpFile.Name()})
-	if r.config.Debug {
-		fmt.Printf("🔨 Comando kubectl: %s %s\n", r.config.CommandBinPath, strings.Join(r.buildKubectlArgs(kubectlArgs...), " "))
-	}
-
 	cmd := r.buildKubectlCmdWithContext(ctx, true, kubectlArgs...)
 	if err := r.runKubectlCommand(cmd, "erro ao aplicar manifesto"); err != nil {
 		return err
@@ -357,10 +353,7 @@ func sanitizeKubernetesName(name string) string {
 	return sanitized
 }
 
-const kubernetesManifestTemplate = `apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{.Namespace}}
+const kubernetesManifestTemplate = `
 {{- if .PersistentVolumes }}
 {{- range .PersistentVolumes }}
 {{- if .HostPath }}

@@ -664,6 +664,47 @@ func (r KubernetesRuntime) WaitForFile(fileName string, timeout time.Duration, i
 	}
 }
 
+func (r KubernetesRuntime) IsNamespaceExist(namespace string) (bool, error) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return false, fmt.Errorf("namespace deve ser informado")
+	}
+
+	cmd := r.buildKubectlCmd(true, "get", "namespace", namespace)
+	cmd.Stdout = io.Discard
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		if strings.Contains(stderrStr, "NotFound") {
+			return false, nil
+		}
+		return false, fmt.Errorf("erro ao verificar namespace %s: %w. Stderr: %s", namespace, err, stderrStr)
+	}
+
+	return true, nil
+}
+
+func (r KubernetesRuntime) CreateNamespace(namespace string) error {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return fmt.Errorf("namespace deve ser informado")
+	}
+
+	exists, err := r.IsNamespaceExist(namespace)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	cmd := r.buildKubectlCmd(true, "create", "namespace", namespace)
+	return r.runKubectlCommand(cmd, fmt.Sprintf("erro ao criar namespace %s", namespace))
+}
+
 func (r KubernetesRuntime) GetStorageClassList() ([]TStorageClass, error) {
 	cmd := r.buildKubectlCmd(true, "get", "storageclass", "-o", "json")
 
