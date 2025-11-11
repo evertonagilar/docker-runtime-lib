@@ -205,3 +205,43 @@ func TestGenerateManifestWithImagePullSecret(t *testing.T) {
 		t.Fatalf("manifesto não contém imagePullSecrets com secret informado. Manifesto:\n%s", output)
 	}
 }
+
+func TestExtractRunSettingsMemoryOptions(t *testing.T) {
+	cfg := extractRunSettings("", "", []string{"--memory=256Mi", "--memory-limit=1Gi"})
+
+	if cfg.MemoryRequest != "256Mi" {
+		t.Fatalf("esperava MemoryRequest=256Mi, obtive %q", cfg.MemoryRequest)
+	}
+	if cfg.MemoryLimit != "1Gi" {
+		t.Fatalf("esperava MemoryLimit=1Gi, obtive %q", cfg.MemoryLimit)
+	}
+}
+
+func TestGenerateManifestWithMemoryResources(t *testing.T) {
+	runCfg := runSettings{
+		PodName:       "demo",
+		Namespace:     "tools",
+		MemoryRequest: "256Mi",
+		MemoryLimit:   "512Mi",
+	}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+	expectedSnippets := []string{
+		"resources:",
+		"requests:\n          memory: 256Mi",
+		"limits:\n          memory: 512Mi",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}

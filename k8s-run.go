@@ -76,6 +76,8 @@ type runSettings struct {
 	PodName       string
 	ContainerName string
 	Namespace     string
+	MemoryRequest string
+	MemoryLimit   string
 }
 
 func extractRunSettings(defaultNamespace, defaultPod string, options []string) runSettings {
@@ -97,6 +99,10 @@ func extractRunSettings(defaultNamespace, defaultPod string, options []string) r
 			cfg.PodName = strings.TrimPrefix(opt, "--name=")
 		case strings.HasPrefix(opt, "--namespace="):
 			cfg.Namespace = strings.TrimPrefix(opt, "--namespace=")
+		case strings.HasPrefix(opt, "--memory="):
+			cfg.MemoryRequest = strings.TrimPrefix(opt, "--memory=")
+		case strings.HasPrefix(opt, "--memory-limit="):
+			cfg.MemoryLimit = strings.TrimPrefix(opt, "--memory-limit=")
 		}
 	}
 
@@ -140,6 +146,8 @@ type manifestData struct {
 	Volumes             []volumeEntry
 	PersistentVolumes   []volumeEntry
 	ImagePullSecretName string
+	MemoryRequest       string
+	MemoryLimit         string
 }
 
 type envEntry struct {
@@ -253,6 +261,8 @@ func buildManifestData(runCfg runSettings, image, workingDir string, command []s
 		Volumes:             volumeEntries,
 		PersistentVolumes:   persistentVolumes,
 		ImagePullSecretName: imagePullSecretName,
+		MemoryRequest:       runCfg.MemoryRequest,
+		MemoryLimit:         runCfg.MemoryLimit,
 	}, nil
 }
 
@@ -425,6 +435,17 @@ spec:
 {{- end }}
 {{- else }}
       env: []
+{{- end }}
+{{- if or .MemoryRequest .MemoryLimit }}
+      resources:
+{{- if .MemoryRequest }}
+        requests:
+          memory: {{.MemoryRequest}}
+{{- end }}
+{{- if .MemoryLimit }}
+        limits:
+          memory: {{.MemoryLimit}}
+{{- end }}
 {{- end }}
 {{- if .Volumes }}
       volumeMounts:
