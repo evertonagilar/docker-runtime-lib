@@ -110,7 +110,28 @@ func addNamespaceArg(namespace string, args []string) []string {
 	return out
 }
 
-const kubectlOutputTailLimit = 4 * 1024
+const (
+	kubectlOutputTailLimit = 4 * 1024
+	kubectlCopyMaxAttempts = 3
+	kubectlCopyRetryDelay = 3 * time.Second
+)
+
+var kubectlCpTransientErrorFragments = []string{
+	"timeout",
+	"timed out",
+	"deadline exceeded",
+	"i/o timeout",
+	"unexpected eof",
+	"connection reset",
+	"broken pipe",
+	"unable to upgrade connection",
+}
+
+var kubectlCpIgnoredWarnings = []string{
+	"tar: Removing leading '/'",
+	"tar: removing leading '/'",
+	"tar: .: file changed as we read it",
+}
 
 func trimAndJoin(parts ...string) string {
 	trimmed := make([]string, 0, len(parts))
@@ -121,6 +142,44 @@ func trimAndJoin(parts ...string) string {
 		}
 	}
 	return strings.Join(trimmed, "\n")
+}
+
+func filterKubectlCpWarnings(output string) string {
+	if output == "" {
+		return ""
+	}
+	lines := strings.Split(output, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		ignored := false
+		for _, warn := range kubectlCpIgnoredWarnings {
+			if strings.Contains(trimmed, warn) {
+				ignored = true
+				break
+			}
+		}
+		if !ignored {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return strings.Join(filtered, "\n")
+}
+
+func shouldRetryKubectlCp(err error, stderr string) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(stderr) + " " + err.Error())
+	for _, fragment := range kubectlCpTransientErrorFragments {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r KubernetesRuntime) runKubectlCommand(cmd *exec.Cmd, errPrefix string) error {
@@ -618,20 +677,41 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		args = append(args, "-c", mainContainerName)
 	}
 	args = addNamespaceArg(namespace, args)
-	cmd := r.buildKubectlCmd(false, args...)
 
-	// Cria buffers separados para stdout e stderr
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	var lastErr error
+	attempts := 0
+	for attempt := 1; attempt <= kubectlCopyMaxAttempts; attempt++ {
+		attempts = attempt
+		cmd := r.buildKubectlCmd(false, args...)
+		cmd.Stdout = io.Discard
 
-	// Redireciona stderr, mas filtra apenas o warning do tar
-	cmd.Stderr = io.Discard // descarta tudo de stderr, incluindo o tar warning
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("erro ao copiar arquivo do pod: %w", err)
+		err := cmd.Run()
+		if err == nil {
+			return nil
+		}
+
+		stderrStr := filterKubectlCpWarnings(strings.TrimSpace(stderr.String()))
+		if stderrStr != "" {
+			err = fmt.Errorf("%w. stderr: %s", err, stderrStr)
+		}
+		lastErr = err
+
+		if attempt < kubectlCopyMaxAttempts && shouldRetryKubectlCp(err, stderrStr) {
+			time.Sleep(time.Duration(attempt) * kubectlCopyRetryDelay)
+			continue
+		}
+
+		break
 	}
 
-	return nil
+	if lastErr == nil {
+		lastErr = fmt.Errorf("falha desconhecida ao executar kubectl cp")
+	}
+
+	return fmt.Errorf("erro ao copiar arquivo do pod após %d tentativa(s): %w", attempts, lastErr)
 }
 
 func (r KubernetesRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error) {
