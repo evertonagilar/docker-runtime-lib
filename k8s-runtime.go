@@ -57,9 +57,13 @@ func (t *tailBuffer) String() string {
 // -------------------- Factory --------------------
 
 func NewKubernetesRuntimeFactory(config TContainerRuntimeConfig) (TContainerRuntime, error) {
-	kubectlBinPath, err := getKubectlBinPath()
-	if err != nil {
-		return nil, err
+	kubectlBinPath := strings.TrimSpace(config.CommandBinPath)
+	if kubectlBinPath == "" {
+		var err error
+		kubectlBinPath, err = getKubectlBinPath()
+		if err != nil {
+			return nil, err
+		}
 	}
 	config.CommandBinPath = kubectlBinPath
 
