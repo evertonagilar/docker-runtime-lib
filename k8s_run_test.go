@@ -1,0 +1,247 @@
+package container
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestGenerateManifestNoVolumes(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{
+		"UID":   "1000",
+		"GID":   "1000",
+		"DEBUG": "true",
+	}
+
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippets := []string{
+		"command: [\"/bin/bash\", \"-c\", \"echo hello\"]",
+		"env:\n        - name: DEBUG\n          value: \"true\"",
+		"volumeMounts: []",
+		"volumes: []",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}
+
+func TestGenerateManifestWithVolumes(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	volumes := []TVolume{
+		{
+			HostPath:  "data",
+			MountPath: "/mnt/data",
+			ReadOnly:  true,
+		},
+	}
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippets := []string{
+		"- name: vol-0",
+		"mountPath: /mnt/data",
+		"readOnly: true",
+		"path: data",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}
+
+func TestGenerateManifestWithStorageClass(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	volumes := []TVolume{
+		{
+			HostPath:  "dados",
+			MountPath: "/mnt/storage",
+		},
+	}
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "fast-storage", "demo-run", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippets := []string{
+		"kind: PersistentVolume",
+		"name: demo-run-pv-0",
+		"storageClassName: fast-storage",
+		"kind: PersistentVolumeClaim",
+		"claimName: demo-run-pvc-0",
+		"persistentVolumeClaim:",
+		"volumeName: demo-run-pv-0",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}
+
+func TestGenerateManifestWithDynamicProvisioning(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	volumes := []TVolume{
+		{
+			MountPath:    "/mnt/dynamic",
+			StorageClass: "fast-storage",
+		},
+	}
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "dynamic-run", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	if strings.Contains(output, "\nkind: PersistentVolume\n") {
+		t.Fatalf("manifesto não deveria conter PersistentVolume para provisionamento dinâmico:\n%s", output)
+	}
+	if strings.Contains(output, "hostPath:") {
+		t.Fatalf("manifesto não deveria conter hostPath para provisionamento dinâmico:\n%s", output)
+	}
+	if strings.Contains(output, "volumeName:") {
+		t.Fatalf("manifesto não deveria definir volumeName na PVC para provisionamento dinâmico:\n%s", output)
+	}
+
+	expectedSnippets := []string{
+		"kind: PersistentVolumeClaim",
+		"storageClassName: fast-storage",
+		"persistentVolumeClaim:",
+		"claimName: dynamic-run-pvc-0",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}
+
+func TestGenerateManifestWithInMemoryVolume(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	volumes := []TVolume{
+		{
+			MountPath: "/mnt/in-memory",
+			InMemory:  true,
+		},
+	}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, volumes, "", "demo", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippets := []string{
+		"emptyDir:",
+		"medium: Memory",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+
+	unexpectedSnippets := []string{
+		"hostPath:",
+		"persistentVolumeClaim:",
+	}
+
+	for _, snippet := range unexpectedSnippets {
+		if strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não deveria conter trecho: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}
+
+func TestGenerateManifestWithImagePullSecret(t *testing.T) {
+	runCfg := runSettings{PodName: "demo", Namespace: "tools"}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "", "my-secret")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+
+	expectedSnippet := "imagePullSecrets:\n    - name: my-secret"
+	if !strings.Contains(output, expectedSnippet) {
+		t.Fatalf("manifesto não contém imagePullSecrets com secret informado. Manifesto:\n%s", output)
+	}
+}
+
+func TestExtractRunSettingsMemoryOptions(t *testing.T) {
+	cfg := extractRunSettings("", "", []string{"--memory=256Mi", "--memory-limit=1Gi"})
+
+	if cfg.MemoryRequest != "256Mi" {
+		t.Fatalf("esperava MemoryRequest=256Mi, obtive %q", cfg.MemoryRequest)
+	}
+	if cfg.MemoryLimit != "1Gi" {
+		t.Fatalf("esperava MemoryLimit=1Gi, obtive %q", cfg.MemoryLimit)
+	}
+}
+
+func TestGenerateManifestWithMemoryResources(t *testing.T) {
+	runCfg := runSettings{
+		PodName:       "demo",
+		Namespace:     "tools",
+		MemoryRequest: "256Mi",
+		MemoryLimit:   "512Mi",
+	}
+	envs := map[string]string{"UID": "1000", "GID": "1000"}
+	command := []string{"/bin/bash", "-c", "echo hello"}
+
+	manifest, err := generateManifest(runCfg, "alpine:latest", "/workspace", command, envs, nil, "", "", "", "")
+	if err != nil {
+		t.Fatalf("esperava manifesto sem erro, recebi: %v", err)
+	}
+
+	output := string(manifest)
+	expectedSnippets := []string{
+		"resources:",
+		"requests:\n          memory: 256Mi",
+		"limits:\n          memory: 512Mi",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("manifesto não contém trecho esperado: %q\nManifesto:\n%s", snippet, output)
+		}
+	}
+}

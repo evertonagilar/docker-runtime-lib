@@ -18,45 +18,54 @@ The main interface is:
 
 ```go
 type TContainerRuntime interface {
-    Up(containerName, composeFile string, WaitContainerRunning bool) error
-    Down(containerName string) error
-    CopyToContainer(srcPath, containerName, destPath string) error
-    IsContainerRunning(containerName string) (bool, error)
-    StopContainer(containerName string) error
-    ShowLogs(containerName string) error
-    Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error
-    ExecInContainer(containerName string, cmd []string) ([]byte, error)
+    Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
+    Down(podOrContainerName, namespace string, force bool) error
+    CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error
+    IsContainerRunning(podOrContainerName, namespace string) (bool, error)
+    StopContainer(podOrContainerName, namespace string) error
+    ShowLogs(podOrContainerName, mainContainerName, namespace string) error
+    Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, mainContainerName, storageClass string) error
+    ExecInContainer(podOrContainerName, mainContainerName, namespace string, cmd []string) ([]byte, error)
+}
+
+type TVolume struct {
+    HostPath     string
+    MountPath    string
+    ReadOnly     bool
+    Size         string
+    StorageClass string
+    InMemory     bool
 }
 ```
 
 ### Function Descriptions
 
-- **Up(containerName, composeFile string, WaitContainerRunning bool) error**  
-  Starts the containers defined in the provided Docker Compose file.
+- **Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error**  
+  Applies the manifest (Docker Compose or Kubernetes) and optionally waits until the workload is running.
 
-- **Down(containerName string) error**  
-  Stops and removes the containers.
+- **Down(podOrContainerName, namespace string, force bool) error**  
+  Stops and removes the container or pod, forcing deletion when `force` is `true`.
 
-- **CopyToContainer(srcPath, containerName, destPath string) error**  
+- **CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error**  
   Copies a file or directory from the host machine to the specified container.
 
-- **IsContainerRunning(containerName string) (bool, error)**  
-  Checks whether a given container is currently running.
+- **IsContainerRunning(podOrContainerName, namespace string) (bool, error)**  
+  Checks whether a given container or pod is currently running.
 
-- **WaitContainerRunning(containerName string, timeout time.Duration) error**  
-  Waits until the specified container is running, or returns an error if the timeout is reached.
+- **WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error**  
+  Waits until the specified workload is running, or returns an error if the timeout is reached.
 
-- **StopContainer(containerName string) error**  
+- **StopContainer(podOrContainerName, namespace string) error**  
   Stops the specified running container.
 
-- **ShowLogs(containerName string) error**  
-  Streams the logs from the specified container.
+- **ShowLogs(podOrContainerName, mainContainerName, namespace string) error**  
+  Streams the logs from the specified container; when using Docker, `mainContainerName` should stay empty.
 
-- **Run(cmdStr, chDir, image, uid, gid string, volumeList, otherOptionsList []string, debug bool) error**  
-  Runs an ad-hoc command in a new container, with configurable working directory, volumes, UID/GID, and additional options.
+- **Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, mainContainerName, storageClass string) error**  
+  Runs an ad-hoc command in a new container, allowing a custom entrypoint plus configurable working directory, per-volume settings (including size, read-only flag, and storage class overrides), UID/GID, namespace overrides, and additional options.
 
-- **ExecInContainer(containerName string, cmd []string) ([]byte, error)**  
-  Executes a command inside an already running container and returns its output.
+- **ExecInContainer(podOrContainerName, mainContainerName, namespace string, cmd []string) ([]byte, error)**  
+  Executes a command inside an already running container and returns its output; for Docker the `mainContainerName` parameter should remain empty.
 
 ## License
 

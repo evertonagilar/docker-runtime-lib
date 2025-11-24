@@ -9,7 +9,8 @@ import (
 
 // Função auxiliar para criar runtime ou pular teste
 func getRuntimeOrSkip(t *testing.T) TContainerRuntime {
-	runtime, err := NewDockerRuntime()
+	var config TContainerRuntimeConfig = TContainerRuntimeConfig{}
+	runtime, err := NewDockerRuntime(config)
 	if err != nil {
 		t.Skipf("Docker não disponível, pulando teste: %v", err)
 	}
@@ -23,13 +24,13 @@ func TestUpAndDown(t *testing.T) {
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
 	t.Log("⬆️  Subindo container...")
-	if err := r.Up("test_container", composeFile, true); err != nil {
+	if err := r.Up("test_container", "", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	t.Log("✅ Container subiu com sucesso")
 
 	t.Log("⬇️ Derrubando container...")
-	if err := r.Down("test_container"); err != nil {
+	if err := r.Down("test_container", "", true); err != nil {
 		t.Fatalf("falha ao derrubar container: %v", err)
 	}
 	t.Log("✅ Container derrubado com sucesso")
@@ -41,12 +42,12 @@ func TestIsContainerRunning(t *testing.T) {
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
 	t.Log("⬆️  Subindo container para teste de status...")
-	if err := r.Up("test_container", composeFile, true); err != nil {
+	if err := r.Up("test_container", "", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	defer func() {
 		t.Log("⬇️ Derrubando container após teste de status...")
-		if err := r.Down("test_container"); err != nil {
+		if err := r.Down("test_container", "", true); err != nil {
 			t.Fatalf("falha ao derrubar container: %v", err)
 		}
 	}()
@@ -56,7 +57,7 @@ func TestIsContainerRunning(t *testing.T) {
 	var running bool
 	var err error
 	for i := 0; i < 5; i++ {
-		running, err = r.IsContainerRunning("test_container")
+		running, err = r.IsContainerRunning("test_container", "")
 		if err != nil {
 			t.Fatalf("erro inesperado: %v", err)
 		}
@@ -79,23 +80,23 @@ func TestStopContainer(t *testing.T) {
 	t.Logf("📁 Compose file criado em: %s", composeFile)
 
 	t.Log("⬆️  Subindo container para teste de stop...")
-	if err := r.Up("test_container", composeFile, true); err != nil {
+	if err := r.Up("test_container", "", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	defer func() {
 		t.Log("⬇️  Derrubando container após teste de stop...")
-		if err := r.Down("test_container"); err != nil {
+		if err := r.Down("test_container", "", true); err != nil {
 			t.Fatalf("falha ao derrubar container: %v", err)
 		}
 	}()
 
 	t.Log("🛑 Parando container...")
-	if err := r.StopContainer("test_container"); err != nil {
+	if err := r.StopContainer("test_container", ""); err != nil {
 		t.Fatalf("falha ao parar container: %v", err)
 	}
 
 	t.Log("🔍 Verificando se container parou...")
-	running, err := r.IsContainerRunning("test_container")
+	running, err := r.IsContainerRunning("test_container", "")
 	if err != nil {
 		t.Fatalf("erro inesperado: %v", err)
 	}
@@ -115,12 +116,12 @@ func TestCopyToContainer(t *testing.T) {
 
 	// Sobe o container nginx
 	t.Log("⬆️  Subindo container nginx para teste de copy...")
-	if err := r.Up("test_container", composeFile, true); err != nil {
+	if err := r.Up("test_container", "", composeFile, true); err != nil {
 		t.Fatalf("falha ao subir container: %v", err)
 	}
 	defer func() {
 		t.Log("⬇️  Derrubando container após teste de copy...")
-		if err := r.Down(containerName); err != nil {
+		if err := r.Down(containerName, "", true); err != nil {
 			t.Fatalf("falha ao derrubar container: %v", err)
 		}
 	}()
@@ -135,13 +136,13 @@ func TestCopyToContainer(t *testing.T) {
 
 	// Copia para dentro do container
 	destPath := "/usr/share/nginx/html/index.html"
-	if err := r.CopyToContainer(tmpFile, containerName, destPath); err != nil {
+	if err := r.CopyToContainer(tmpFile, containerName, "", "", destPath); err != nil {
 		t.Fatalf("falha ao copiar arquivo para container: %v", err)
 	}
 	t.Logf("✅ Arquivo copiado para %s dentro do container", destPath)
 
 	// Verifica se o conteúdo foi copiado corretamente
-	out, err := r.ExecInContainer(containerName, []string{"cat", destPath})
+	out, err := r.ExecInContainer(containerName, "", "", []string{"cat", destPath})
 	if err != nil {
 		t.Fatalf("falha ao ler arquivo dentro do container: %v", err)
 	}
