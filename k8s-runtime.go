@@ -107,10 +107,10 @@ func addNamespaceArg(namespace string, args []string) []string {
 	if namespace == "" || len(args) == 0 {
 		return args
 	}
+	// Place namespace before subcommand: kubectl -n namespace cp ...
 	out := make([]string, 0, len(args)+2)
-	out = append(out, args[0])
 	out = append(out, "-n", namespace)
-	out = append(out, args[1:]...)
+	out = append(out, args...)
 	return out
 }
 
