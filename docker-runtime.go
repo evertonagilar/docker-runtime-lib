@@ -215,9 +215,13 @@ func (r DockerRuntime) CopyToHost(src, podOrContainerName, mainContainerName, na
 		return fmt.Errorf("nome do container não informado")
 	}
 
-	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", fmt.Sprintf("%s:%s", targetName, src), dst)
+	destDir := path.Dir(dst)
+	fileName := filepath.Base(dst)
+
+	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", fmt.Sprintf("%s:%s", targetName, src), fileName)
+	copyCmd.Dir = destDir
 	if err := copyCmd.Run(); err != nil {
-		return fmt.Errorf("erro ao copiar para o container: %w", err)
+		return fmt.Errorf("erro ao copiar do container: %w", err)
 	}
 
 	return nil
@@ -262,7 +266,8 @@ func (r DockerRuntime) GetContainerStatus(podOrContainerName, namespace string) 
 
 	if err := cmd.Run(); err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
-		if strings.Contains(stderrStr, "No such object") || strings.Contains(stderrStr, "Error: No such container") {
+		stderrLower := strings.ToLower(stderrStr)
+		if strings.Contains(stderrLower, "no such object") || strings.Contains(stderrLower, "error: no such container") {
 			return ContainerStatusNotFound, nil
 		}
 		return ContainerStatusUnknown, fmt.Errorf("erro ao inspecionar container %s: %w. Stderr: %s", podOrContainerName, err, stderrStr)
