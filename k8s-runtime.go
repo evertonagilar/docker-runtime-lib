@@ -3,6 +3,7 @@ package container
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -676,50 +677,43 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
 
-	args := []string{"cp", fmt.Sprintf("%s:%s", podOrContainerName, src), dst}
+	// Use base64 encoding to avoid tar issues on Windows
+	// kubectl exec pod -- base64 /file > local.base64
+	execArgs := []string{"exec", podOrContainerName}
 	if mainContainerName != "" {
-		args = append(args, "-c", mainContainerName)
+		execArgs = append(execArgs, "-c", mainContainerName)
 	}
-	args = addNamespaceArg(namespace, args)
+	execArgs = append(execArgs, "--", "base64", src)
+	execArgs = addNamespaceArg(namespace, execArgs)
 
-	var lastErr error
-	attempts := 0
-	for attempt := 1; attempt <= kubectlCopyMaxAttempts; attempt++ {
-		attempts = attempt
-		cmd := r.buildKubectlCmd(false, args...)
+	cmd := r.buildKubectlCmd(true, execArgs...)
 
-		// Debug: show complete kubectl command (after buildKubectlArgs adds kubeconfig)
-		fmt.Printf("🔨 Comando kubectl cp: %s %s\n", cmd.Path, strings.Join(cmd.Args[1:], " "))
+	// Debug: show command
+	fmt.Printf("🔨 Comando kubectl exec base64: %s %s\n", cmd.Path, strings.Join(cmd.Args[1:], " "))
 
-		cmd.Stdout = io.Discard
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-
-		err := cmd.Run()
-		if err == nil {
-			return nil
-		}
-
-		stderrStr := filterKubectlCpWarnings(strings.TrimSpace(stderr.String()))
-		if stderrStr != "" {
-			err = fmt.Errorf("%w. stderr: %s", err, stderrStr)
-		}
-		lastErr = err
-
-		if attempt < kubectlCopyMaxAttempts && shouldRetryKubectlCp(err, stderrStr) {
-			time.Sleep(time.Duration(attempt) * kubectlCopyRetryDelay)
-			continue
-		}
-
-		break
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		return fmt.Errorf("erro ao executar base64 no pod: %w. stderr: %s", err, stderrStr)
 	}
 
-	if lastErr == nil {
-		lastErr = fmt.Errorf("falha desconhecida ao executar kubectl cp")
+	// Decode base64 content
+	base64Content := stdout.Bytes()
+	decodedContent := make([]byte, base64.StdEncoding.DecodedLen(len(base64Content)))
+	n, err := base64.StdEncoding.Decode(decodedContent, base64Content)
+	if err != nil {
+		return fmt.Errorf("erro ao decodificar base64: %w", err)
 	}
 
-	return fmt.Errorf("erro ao copiar arquivo do pod após %d tentativa(s): %w", attempts, lastErr)
+	// Write to destination file
+	if err := os.WriteFile(dst, decodedContent[:n], 0644); err != nil {
+		return fmt.Errorf("erro ao escrever arquivo: %w", err)
+	}
+
+	return nil
 }
 
 func (r KubernetesRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error) {
