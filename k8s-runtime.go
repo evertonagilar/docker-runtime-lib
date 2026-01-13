@@ -700,12 +700,22 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		return fmt.Errorf("erro ao executar base64 no pod: %w. stderr: %s", err, stderrStr)
 	}
 
-	// Decode base64 content
+	// Clean base64 content: remove all whitespace (spaces, newlines, tabs)
+	// This handles cases where base64 output has line breaks or mixed with warnings
 	base64Content := stdout.Bytes()
-	decodedContent := make([]byte, base64.StdEncoding.DecodedLen(len(base64Content)))
-	n, err := base64.StdEncoding.Decode(decodedContent, base64Content)
+	cleanedBase64 := make([]byte, 0, len(base64Content))
+	for _, b := range base64Content {
+		// Keep only valid base64 characters: A-Z, a-z, 0-9, +, /, =
+		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '+' || b == '/' || b == '=' {
+			cleanedBase64 = append(cleanedBase64, b)
+		}
+	}
+
+	// Decode base64 content
+	decodedContent := make([]byte, base64.StdEncoding.DecodedLen(len(cleanedBase64)))
+	n, err := base64.StdEncoding.Decode(decodedContent, cleanedBase64)
 	if err != nil {
-		return fmt.Errorf("erro ao decodificar base64: %w", err)
+		return fmt.Errorf("erro ao decodificar base64: %w (tamanho original: %d, limpo: %d)", err, len(base64Content), len(cleanedBase64))
 	}
 
 	// Write to destination file
