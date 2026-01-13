@@ -117,7 +117,7 @@ func addNamespaceArg(namespace string, args []string) []string {
 const (
 	kubectlOutputTailLimit = 4 * 1024
 	kubectlCopyMaxAttempts = 3
-	kubectlCopyRetryDelay = 3 * time.Second
+	kubectlCopyRetryDelay  = 3 * time.Second
 )
 
 var kubectlCpTransientErrorFragments = []string{
@@ -681,6 +681,10 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		args = append(args, "-c", mainContainerName)
 	}
 	args = addNamespaceArg(namespace, args)
+
+	// Debug: show kubectl command
+	fmt.Printf("🔨 Comando kubectl cp: %s %s\n", r.config.CommandBinPath, strings.Join(args, " "))
+	fmt.Printf("   src=%s, dst=%s\n", src, dst)
 
 	var lastErr error
 	attempts := 0
