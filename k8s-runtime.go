@@ -690,7 +690,6 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 
 		// Debug: show complete kubectl command (after buildKubectlArgs adds kubeconfig)
 		fmt.Printf("🔨 Comando kubectl cp: %s %s\n", cmd.Path, strings.Join(cmd.Args[1:], " "))
-		fmt.Printf("   src=%s, dst=%s\n", src, dst)
 
 		cmd.Stdout = io.Discard
 
