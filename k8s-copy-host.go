@@ -22,9 +22,6 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 
 	// 1. Check file size first (just for logging/debug)
 	fileSize, err := r.getRemoteFileSize(src, podOrContainerName, mainContainerName, namespace)
-	if err == nil && r.config.Debug {
-		fmt.Printf("📦 Iniciando download de %s (%.2f MB)\n", src, float64(fileSize)/(1024*1024))
-	}
 
 	// 2. Setup execution command: cat <file>
 	execArgs := []string{"exec", podOrContainerName}
