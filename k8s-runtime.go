@@ -386,7 +386,7 @@ func (r KubernetesRuntime) StopContainer(podOrContainerName, namespace string) e
 	return r.runKubectlCommand(cmd, fmt.Sprintf("erro ao deletar pod %s", podOrContainerName))
 }
 
-func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string) error {
+func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string, tail *int) error {
 	if podOrContainerName == "" {
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
@@ -395,6 +395,15 @@ func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, names
 	if mainContainerName != "" {
 		args = append(args, "-c", mainContainerName)
 	}
+
+	// Add tail parameter
+	if tail != nil {
+		args = append(args, "--tail", fmt.Sprintf("%d", *tail))
+	} else {
+		// Default: show last 100 lines
+		args = append(args, "--tail", "100")
+	}
+
 	args = append(args, "-f")
 	args = addNamespaceArg(namespace, args)
 	cmd := r.buildKubectlCmd(true, args...)
