@@ -22,7 +22,7 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 	}
 
 	// Check for lock file indicating interrupted previous copy
-	lockFile := filepath.Join(dstPath, ".copy-incremental.lock")
+	lockFile := filepath.ToSlash(filepath.Join(dstPath, ".copy-incremental.lock"))
 	lockExists, err := r.checkRemoteFileExists(lockFile, podOrContainerName, mainContainerName, namespace)
 	if err == nil && lockExists {
 		if debug {
@@ -44,7 +44,7 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 		}
 
 		// Save checksums
-		checksumFile := filepath.Join(dstPath, ".checksums.json")
+		checksumFile := filepath.ToSlash(filepath.Join(dstPath, ".checksums.json"))
 		if err := r.saveRemoteChecksums(checksumFile, localChecksums, podOrContainerName, mainContainerName, namespace, debug); err != nil {
 			return fmt.Errorf("erro ao salvar checksums remotos: %w", err)
 		}
@@ -68,7 +68,7 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 	}
 
 	// Retrieve existing checksums from container (if any)
-	checksumFile := filepath.Join(dstPath, ".checksums.json")
+	checksumFile := filepath.ToSlash(filepath.Join(dstPath, ".checksums.json"))
 	remoteChecksums, err := r.getRemoteChecksums(checksumFile, podOrContainerName, mainContainerName, namespace, debug)
 
 	// First run: destination doesn't exist, do full copy
@@ -105,8 +105,8 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 
 		// Copy only changed directories
 		for _, subdir := range dirsToSync {
-			srcPath := filepath.Join(srcDir, subdir)
-			dstSubPath := filepath.Join(dstPath, subdir)
+			srcPath := filepath.Join(srcDir, subdir)                       // Local path, keep OS specific
+			dstSubPath := filepath.ToSlash(filepath.Join(dstPath, subdir)) // Remote path, force forward slash
 
 			if debug {
 				fmt.Printf("  📁 %s\n", subdir)
@@ -142,8 +142,8 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 		}
 
 		for _, file := range rootFiles {
-			srcPath := filepath.Join(srcDir, file)
-			dstFilePath := filepath.Join(dstPath, file)
+			srcPath := filepath.Join(srcDir, file)                        // Local path, keep OS specific
+			dstFilePath := filepath.ToSlash(filepath.Join(dstPath, file)) // Remote path, force forward slash
 
 			if debug {
 				fmt.Printf("  📄 %s\n", file)
