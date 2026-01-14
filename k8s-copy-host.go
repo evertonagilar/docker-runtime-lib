@@ -1,17 +1,16 @@
 package container
 
 import (
-	"archive/tar"
 	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // CopyToHost copies a file from a pod to the host using a single streaming connection.
+// It uses 'cat' to stream the file content directly to stdout, which is then written to the destination file.
 // This is significantly faster than chunked transfer as it avoids the overhead of
 // multiple process startups and base64 encoding/decoding.
 func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error {
@@ -25,23 +24,17 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		fmt.Printf("📦 Iniciando download de %s (%.2f MB)\n", src, float64(fileSize)/(1024*1024))
 	}
 
-	// 2. Prepare tar command string
-	// tar -cf - -C <dir> <filename>
-	srcDir := filepath.Dir(src)
-	srcFile := filepath.Base(src)
-	tarCmd := fmt.Sprintf("tar cf - -C %s %s", srcDir, srcFile)
-
-	// 3. Setup execution command
+	// 2. Setup execution command: cat <file>
 	execArgs := []string{"exec", podOrContainerName}
 	if mainContainerName != "" {
 		execArgs = append(execArgs, "-c", mainContainerName)
 	}
-	execArgs = append(execArgs, "--", "sh", "-c", tarCmd)
+	execArgs = append(execArgs, "--", "cat", src)
 	execArgs = addNamespaceArg(namespace, execArgs)
 
 	cmd := r.buildKubectlCmd(true, execArgs...)
 
-	// 4. Get stdout pipe
+	// 3. Get stdout pipe
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("erro ao criar pipe de stdout: %w", err)
@@ -51,65 +44,41 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	// 5. Start command
+	// 4. Start command
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("erro ao iniciar comando de cópia: %w", err)
 	}
 
-	// 6. Process the tar stream
-	tr := tar.NewReader(stdout)
+	// 5. Create destination file
+	outFile, err := os.Create(dst)
+	if err != nil {
+		// Try to kill process if file create fails
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("erro ao criar arquivo de destino: %w", err)
+	}
+	defer outFile.Close()
 
-	// We expect only one file (or multiple if directory, but CopyToHost implies single target usually)
-	// We'll extract the first matching entry to dst local file
-	found := false
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			// Wait for command to finish to get exit code
-			_ = cmd.Wait()
-			return fmt.Errorf("erro ao ler stream tar: %w (stderr: %s)", err, stderr.String())
-		}
-
-		if header.Name == srcFile {
-			found = true
-
-			// Open destination file
-			outFile, err := os.Create(dst)
-			if err != nil {
-				_ = cmd.Wait()
-				return fmt.Errorf("erro ao criar arquivo de destino: %w", err)
-			}
-
-			// Copy content directly
-			copied, err := io.Copy(outFile, tr)
-			outFile.Close()
-			if err != nil {
-				_ = cmd.Wait()
-				return fmt.Errorf("erro ao escrever dados no arquivo: %w", err)
-			}
-
-			if r.config.Debug {
-				fmt.Printf("✅ Download concluído: %d bytes copiados\n", copied)
-			}
-
-			// We found and copied our file, we can stop
-			break
-		}
+	// 6. Copy content directly from stdout to file
+	copied, err := io.Copy(outFile, stdout)
+	if err != nil {
+		return fmt.Errorf("erro ao escrever dados no arquivo: %w", err)
 	}
 
-	// 7. Wait for command to complete
+	// 7. Wait for command to complete and check exit code
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("comando de cópia falhou: %w, stderr: %s", err, stderr.String())
 	}
 
-	if !found {
-		// If we didn't find the file in the tar stream (e.g. empty or wrong path)
-		// Try fallback with cat if tar failed silently? No, cmd.Wait should have caught it.
-		// If tar succeeds but empty, maybe file doesn't exist?
-		return fmt.Errorf("arquivo or diretório não encontrado no stream")
+	if r.config.Debug {
+		fmt.Printf("✅ Download concluído: %d bytes copiados\n", copied)
+	}
+
+	// Verify size match if we got the size initially
+	if fileSize > 0 && copied != fileSize {
+		// Just a warning, not an error, as file might have changed
+		if r.config.Debug {
+			fmt.Printf("⚠️  Aviso: Tamanho copiado (%d) difere do tamanho original (%d)\n", copied, fileSize)
+		}
 	}
 
 	return nil
