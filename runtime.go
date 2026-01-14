@@ -65,7 +65,7 @@ type TContainerRuntime interface {
 	IsContainerRunning(podOrContainerName, namespace string) (bool, error)
 	WaitContainerRunning(podOrContainerName, namespace string, timeout time.Duration) error
 	StopContainer(podOrContainerName, namespace string) error
-	ShowLogs(podOrContainerName, mainContainerName, namespace string, tail *int) error
+	ShowLogs(podOrContainerName, mainContainerName, namespace string, tail int) error
 	Run(cmdStr, entrypoint, chDir, image, uid, gid string,
 		volumes []TVolume, otherOptionsList []string, namespace,
 		podOrContainerName, mainContainerName, storageClass string) error

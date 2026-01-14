@@ -327,7 +327,7 @@ func (r DockerRuntime) StopContainer(podOrContainerName, namespace string) error
 	return cmd.Run()
 }
 
-func (r DockerRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string, tail *int) error {
+func (r DockerRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string, tail int) error {
 	_ = namespace
 	_ = tail // Docker logs -f doesn't support --tail, would need different approach
 	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {

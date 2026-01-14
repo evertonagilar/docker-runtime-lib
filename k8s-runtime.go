@@ -118,6 +118,7 @@ const (
 	kubectlOutputTailLimit = 4 * 1024
 	kubectlCopyMaxAttempts = 3
 	kubectlCopyRetryDelay  = 3 * time.Second
+	DefaultLogTailLines    = 100 // Número padrão de linhas de log a exibir
 )
 
 var kubectlCpTransientErrorFragments = []string{
@@ -386,7 +387,7 @@ func (r KubernetesRuntime) StopContainer(podOrContainerName, namespace string) e
 	return r.runKubectlCommand(cmd, fmt.Sprintf("erro ao deletar pod %s", podOrContainerName))
 }
 
-func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string, tail *int) error {
+func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, namespace string, tail int) error {
 	if podOrContainerName == "" {
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
@@ -396,12 +397,11 @@ func (r KubernetesRuntime) ShowLogs(podOrContainerName, mainContainerName, names
 		args = append(args, "-c", mainContainerName)
 	}
 
-	// Add tail parameter
-	if tail != nil {
-		args = append(args, "--tail", fmt.Sprintf("%d", *tail))
+	// Add tail parameter (-1 = default 100 lines)
+	if tail < 0 {
+		args = append(args, "--tail", fmt.Sprintf("%d", DefaultLogTailLines))
 	} else {
-		// Default: show last 100 lines
-		args = append(args, "--tail", "100")
+		args = append(args, "--tail", fmt.Sprintf("%d", tail))
 	}
 
 	args = append(args, "-f")
