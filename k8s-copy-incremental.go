@@ -29,11 +29,25 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 	// Retrieve existing checksums from container (if any)
 	checksumFile := filepath.Join(dstPath, ".checksums.json")
 	remoteChecksums, err := r.getRemoteChecksums(checksumFile, podOrContainerName, mainContainerName, namespace, debug)
+
+	// First run: destination doesn't exist, do full copy
 	if err != nil {
 		if debug {
 			fmt.Printf("⚠️  Não foi possível recuperar checksums remotos (primeira execução?): %v\n", err)
+			fmt.Println("📤 Primeira execução: enviando todo o código fonte")
 		}
-		remoteChecksums = make(TChecksumMap)
+
+		// Do full copy of entire directory
+		if err := r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath); err != nil {
+			return fmt.Errorf("erro ao copiar código fonte completo: %w", err)
+		}
+
+		// Save checksums for next time
+		if err := r.saveRemoteChecksums(checksumFile, localChecksums, podOrContainerName, mainContainerName, namespace, debug); err != nil {
+			return fmt.Errorf("erro ao salvar checksums remotos: %w", err)
+		}
+
+		return nil
 	}
 
 	// Compare and identify what needs to be copied
