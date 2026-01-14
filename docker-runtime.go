@@ -227,6 +227,16 @@ func (r DockerRuntime) CopyToHost(src, podOrContainerName, mainContainerName, na
 	return nil
 }
 
+// CopyToContainerIncremental is a stub for Docker runtime.
+// Docker doesn't benefit from incremental copy as much as Kubernetes,
+// so we just fall back to the regular copy method.
+func (r DockerRuntime) CopyToContainerIncremental(srcDir, podOrContainerName, mainContainerName, namespace, dstPath string, debug bool) error {
+	if debug {
+		fmt.Println("ℹ️  Docker runtime não suporta cópia incremental, usando cópia completa")
+	}
+	return r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath)
+}
+
 func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error) {
 	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
 		return false, err

@@ -1,0 +1,221 @@
+package container
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// TChecksumMap stores checksums for subdirectories
+type TChecksumMap map[string]string
+
+// CopyToContainerIncremental copies a directory to a container incrementally.
+// It calculates checksums for each subdirectory and only copies those that have changed.
+func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName, mainContainerName, namespace, dstPath string, debug bool) error {
+	if debug {
+		fmt.Printf("📊 Calculando checksums do código fonte em %s\n", srcDir)
+	}
+
+	// Calculate checksums for all subdirectories in srcDir
+	localChecksums, err := calculateDirectoryChecksums(srcDir, debug)
+	if err != nil {
+		return fmt.Errorf("erro ao calcular checksums locais: %w", err)
+	}
+
+	// Retrieve existing checksums from container (if any)
+	checksumFile := filepath.Join(dstPath, ".checksums.json")
+	remoteChecksums, err := r.getRemoteChecksums(checksumFile, podOrContainerName, mainContainerName, namespace, debug)
+	if err != nil {
+		if debug {
+			fmt.Printf("⚠️  Não foi possível recuperar checksums remotos (primeira execução?): %v\n", err)
+		}
+		remoteChecksums = make(TChecksumMap)
+	}
+
+	// Compare and identify what needs to be copied
+	dirsToSync := identifyChangedDirectories(localChecksums, remoteChecksums, debug)
+
+	if len(dirsToSync) == 0 {
+		if debug {
+			fmt.Println("✅ Nenhuma alteração detectada, pulando envio de código fonte")
+		}
+		return nil
+	}
+
+	if debug {
+		fmt.Printf("📤 Enviando %d subpasta(s) modificada(s)\n", len(dirsToSync))
+	}
+
+	// Copy only changed directories
+	for _, subdir := range dirsToSync {
+		srcPath := filepath.Join(srcDir, subdir)
+		dstSubPath := filepath.Join(dstPath, subdir)
+
+		if debug {
+			fmt.Printf("  📁 %s\n", subdir)
+		}
+
+		// Use existing CopyToContainer for each subdirectory
+		if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstSubPath); err != nil {
+			return fmt.Errorf("erro ao copiar %s: %w", subdir, err)
+		}
+	}
+
+	// Update checksums in container
+	if err := r.saveRemoteChecksums(checksumFile, localChecksums, podOrContainerName, mainContainerName, namespace, debug); err != nil {
+		return fmt.Errorf("erro ao salvar checksums remotos: %w", err)
+	}
+
+	return nil
+}
+
+// calculateDirectoryChecksums calculates SHA256 checksums for each subdirectory
+func calculateDirectoryChecksums(rootDir string, debug bool) (TChecksumMap, error) {
+	checksums := make(TChecksumMap)
+
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		// Skip hidden directories and common build artifacts
+		name := entry.Name()
+		if name[0] == '.' || name == "build" || name == "target" || name == "node_modules" {
+			continue
+		}
+
+		subPath := filepath.Join(rootDir, name)
+		checksum, err := calculateDirChecksum(subPath)
+		if err != nil {
+			return nil, fmt.Errorf("erro ao calcular checksum de %s: %w", name, err)
+		}
+
+		checksums[name] = checksum
+
+		if debug {
+			fmt.Printf("  %s: %s\n", name, checksum[:12])
+		}
+	}
+
+	return checksums, nil
+}
+
+// calculateDirChecksum calculates a checksum for all files in a directory recursively
+func calculateDirChecksum(dirPath string) (string, error) {
+	hash := sha256.New()
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Include file path relative to dirPath in hash
+		relPath, _ := filepath.Rel(dirPath, path)
+		hash.Write([]byte(relPath))
+
+		// Include file content in hash
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		if _, err := io.Copy(hash, file); err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+// identifyChangedDirectories compares local and remote checksums
+func identifyChangedDirectories(local, remote TChecksumMap, debug bool) []string {
+	var changed []string
+
+	for dir, localSum := range local {
+		remoteSum, exists := remote[dir]
+		if !exists || localSum != remoteSum {
+			changed = append(changed, dir)
+			if debug && exists {
+				fmt.Printf("  🔄 %s modificado\n", dir)
+			} else if debug {
+				fmt.Printf("  ➕ %s novo\n", dir)
+			}
+		}
+	}
+
+	return changed
+}
+
+// getRemoteChecksums retrieves checksums from the container
+func (r KubernetesRuntime) getRemoteChecksums(checksumFile, podOrContainerName, mainContainerName, namespace string, debug bool) (TChecksumMap, error) {
+	// Try to read checksum file from container
+	execArgs := []string{"exec", podOrContainerName}
+	if mainContainerName != "" {
+		execArgs = append(execArgs, "-c", mainContainerName)
+	}
+	execArgs = append(execArgs, "--", "cat", checksumFile)
+	execArgs = addNamespaceArg(namespace, execArgs)
+
+	cmd := r.buildKubectlCmd(true, execArgs...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var checksums TChecksumMap
+	if err := json.Unmarshal(output, &checksums); err != nil {
+		return nil, err
+	}
+
+	return checksums, nil
+}
+
+// saveRemoteChecksums saves checksums to the container
+func (r KubernetesRuntime) saveRemoteChecksums(checksumFile string, checksums TChecksumMap, podOrContainerName, mainContainerName, namespace string, debug bool) error {
+	data, err := json.Marshal(checksums)
+	if err != nil {
+		return err
+	}
+
+	// Escape single quotes in JSON for shell
+	jsonStr := strings.ReplaceAll(string(data), "'", "'\\''")
+
+	// Write checksums to container using echo and redirection
+	execArgs := []string{"exec", podOrContainerName}
+	if mainContainerName != "" {
+		execArgs = append(execArgs, "-c", mainContainerName)
+	}
+	execArgs = append(execArgs, "--", "sh", "-c", fmt.Sprintf("echo '%s' > %s", jsonStr, checksumFile))
+	execArgs = addNamespaceArg(namespace, execArgs)
+
+	cmd := r.buildKubectlCmd(true, execArgs...)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	if debug {
+		fmt.Printf("💾 Checksums salvos em %s\n", checksumFile)
+	}
+
+	return nil
+}

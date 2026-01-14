@@ -32,7 +32,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 
 	// Download file in chunks
-	const chunkSize = 2 * 1024 * 1024 // 2MB chunks
+	const chunkSize = 15 * 1024 * 1024 // 10MB chunks
 	const maxRetries = 3
 
 	outFile, err := os.Create(dst)

@@ -76,6 +76,7 @@ type TContainerRuntime interface {
 	IsVolumeExist(volumeName string) bool
 	IsNetworkExist(networkName string) bool
 	CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error
+	CopyToContainerIncremental(srcDir, podOrContainerName, mainContainerName, namespace, dstPath string, debug bool) error
 	CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error
 	WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error)
 	GetStorageClassList() ([]TStorageClass, error)
