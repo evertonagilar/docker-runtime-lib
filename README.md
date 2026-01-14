@@ -20,12 +20,14 @@ The main interface is:
 type TContainerRuntime interface {
     Up(podOrContainerName, namespace, manifestFile string, waitContainerRunning bool) error
     Down(podOrContainerName, namespace string, force bool) error
-    CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error
+    CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string, useAtomicCopy bool) error
+    CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error
     IsContainerRunning(podOrContainerName, namespace string) (bool, error)
     StopContainer(podOrContainerName, namespace string) error
     ShowLogs(podOrContainerName, mainContainerName, namespace string) error
     Run(cmdStr, entrypoint, chDir, image, uid, gid string, volumes []TVolume, otherOptionsList []string, namespace, podOrContainerName, mainContainerName, storageClass string) error
     ExecInContainer(podOrContainerName, mainContainerName, namespace string, cmd []string) ([]byte, error)
+    CopyToContainerIncremental(srcDir, podOrContainerName, mainContainerName, namespace, dstPath string, debug bool) error
 }
 
 type TVolume struct {
@@ -46,8 +48,8 @@ type TVolume struct {
 - **Down(podOrContainerName, namespace string, force bool) error**  
   Stops and removes the container or pod, forcing deletion when `force` is `true`.
 
-- **CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error**  
-  Copies a file or directory from the host machine to the specified container.
+- **CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string, useAtomicCopy bool) error**  
+  Copies a file or directory from the host machine to the specified container. Supports atomic copy for files (using a temporary file and atomic rename) and automatic path normalization for Windows.
 
 - **IsContainerRunning(podOrContainerName, namespace string) (bool, error)**  
   Checks whether a given container or pod is currently running.
@@ -57,6 +59,9 @@ type TVolume struct {
 
 - **StopContainer(podOrContainerName, namespace string) error**  
   Stops the specified running container.
+  
+- **CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error**
+  Copies a file or directory from the container to the host machine, including automatic path normalization for Windows.
 
 - **ShowLogs(podOrContainerName, mainContainerName, namespace string) error**  
   Streams the logs from the specified container; when using Docker, `mainContainerName` should stay empty.
