@@ -33,6 +33,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 
 	// Download file in chunks
 	const chunkSize = 15 * 1024 * 1024 // 10MB chunks
+	const blockSize = 15 * 1024 * 1024 // 10MB chunks
 	const maxRetries = 3
 
 	outFile, err := os.Create(dst)
@@ -41,20 +42,21 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 	defer outFile.Close()
 
+	totalBlocks := (fileSize + blockSize - 1) / blockSize
 	var offset int64 = 0
-	chunkNum := 0
+	blockNum := 1
 
 	for offset < fileSize {
-		chunkNum++
 		remaining := fileSize - offset
-		currentChunkSize := chunkSize
-		if remaining < int64(chunkSize) {
-			currentChunkSize = int(remaining)
+		currentBlockSize := blockSize
+		if remaining < blockSize {
+			currentBlockSize = remaining
 		}
 
 		if r.config.Debug {
-			fmt.Printf("📥 Baixando bloco %d: offset=%d, tamanho=%d bytes (%.1f%%)\n",
-				chunkNum, offset, currentChunkSize, float64(offset)*100/float64(fileSize))
+			percentage := float64(offset) / float64(fileSize) * 100
+			fmt.Printf("📥 Baixando bloco %d/%d: offset=%d, tamanho=%d bytes (%.1f%%)\n",
+				blockNum, totalBlocks, offset, currentBlockSize, percentage)
 		}
 
 		// Retry logic for this chunk
@@ -62,7 +64,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		var lastErr error
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
-			chunkData, lastErr = r.downloadChunk(src, offset, currentChunkSize, podOrContainerName, mainContainerName, namespace)
+			chunkData, lastErr = r.downloadChunk(src, offset, currentBlockSize, podOrContainerName, mainContainerName, namespace)
 			if lastErr == nil {
 				break
 			}
