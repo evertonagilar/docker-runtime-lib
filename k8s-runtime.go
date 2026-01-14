@@ -631,7 +631,7 @@ func (r KubernetesRuntime) GetContainerIP(podOrContainerName, namespace string) 
 	return ip, nil
 }
 
-func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string, useAtomicCopy bool) error {
 	if podOrContainerName == "" {
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
@@ -644,8 +644,8 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 		return fmt.Errorf("erro ao verificar origem: %w", err)
 	}
 
-	// For directories, use direct copy (kubectl cp handles it)
-	if srcInfo.IsDir() {
+	// For directories or when atomic copy is not needed, use direct copy
+	if srcInfo.IsDir() || !useAtomicCopy {
 		copyArgs := []string{"cp", src, fmt.Sprintf("%s:%s", podOrContainerName, dst)}
 		if mainContainerName != "" {
 			copyArgs = append(copyArgs, "-c", mainContainerName)
@@ -655,12 +655,16 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 		copyCmd.Stdout = os.Stdout
 		copyCmd.Stderr = os.Stderr
 		if err := copyCmd.Run(); err != nil {
-			return fmt.Errorf("erro ao copiar diretório para o pod: %w", err)
+			if srcInfo.IsDir() {
+				return fmt.Errorf("erro ao copiar diretório para o pod: %w", err)
+			}
+			return fmt.Errorf("erro ao copiar arquivo para o pod: %w", err)
 		}
 		return nil
 	}
 
-	// For files, use temporary file + atomic move
+	// For files with atomic copy: use temporary file + atomic move
+	// This is useful for JBoss deploy to avoid deploying incomplete files
 	destDir := path.Dir(dst)
 	tmpName := filepath.Base(dst) + ".tmp"
 	tmpDestPath := path.Join(destDir, tmpName)

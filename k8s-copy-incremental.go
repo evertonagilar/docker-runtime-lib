@@ -38,7 +38,7 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 		}
 
 		// Do full copy of entire directory
-		if err := r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath); err != nil {
+		if err := r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath, false); err != nil {
 			return fmt.Errorf("erro ao copiar código fonte completo: %w", err)
 		}
 
@@ -83,7 +83,7 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 			_ = cmd.Run() // Ignora erro se pasta não existir
 
 			// Use existing CopyToContainer for each subdirectory
-			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstSubPath); err != nil {
+			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstSubPath, false); err != nil {
 				return fmt.Errorf("erro ao copiar %s: %w", subdir, err)
 			}
 		}
@@ -108,7 +108,7 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 				fmt.Printf("  📄 %s\n", file)
 			}
 
-			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstFilePath); err != nil {
+			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstFilePath, false); err != nil {
 				return fmt.Errorf("erro ao copiar arquivo raiz %s: %w", file, err)
 			}
 		}

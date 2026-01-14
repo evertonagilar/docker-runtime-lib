@@ -177,7 +177,7 @@ func (r DockerRuntime) Down(podOrContainerName, _ string, force bool) error {
 	return nil
 }
 
-func (r DockerRuntime) CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+func (r DockerRuntime) CopyToContainer(src, podOrContainerName, mainContainerName, namespace, dst string, useAtomicCopy bool) error {
 	_ = namespace
 	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
 		return err
@@ -188,8 +188,8 @@ func (r DockerRuntime) CopyToContainer(src, podOrContainerName, mainContainerNam
 	}
 
 	destDir := path.Dir(dst)
-	tempName := filepath.Base(dst) + ".tmp"
-	tmpDestPath := path.Join(destDir, tempName)
+	tmpName := filepath.Base(dst) + ".tmp"
+	tmpDestPath := path.Join(destDir, tmpName)
 	src = filepath.ToSlash(src)
 
 	copyCmd := r.buildDockerCmd(false, "cp", "-L", "-q", src, fmt.Sprintf("%s:%s", targetName, tmpDestPath))
@@ -234,7 +234,7 @@ func (r DockerRuntime) CopyToContainerIncremental(srcDir, podOrContainerName, ma
 	if debug {
 		fmt.Println("ℹ️  Docker runtime não suporta cópia incremental, usando cópia completa")
 	}
-	return r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath)
+	return r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath, false)
 }
 
 func (r DockerRuntime) WaitForFile(fileName string, timeout time.Duration, interval time.Duration, podOrContainerName, mainContainerName, namespace string) (bool, error) {
