@@ -55,27 +55,51 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 
 	if len(dirsToSync) == 0 {
 		if debug {
-			fmt.Println("✅ Nenhuma alteração detectada, pulando envio de código fonte")
+			fmt.Println("✅ Nenhuma alteração detectada nas subpastas")
 		}
-		return nil
-	}
-
-	if debug {
-		fmt.Printf("📤 Enviando %d subpasta(s) modificada(s)\n", len(dirsToSync))
-	}
-
-	// Copy only changed directories
-	for _, subdir := range dirsToSync {
-		srcPath := filepath.Join(srcDir, subdir)
-		dstSubPath := filepath.Join(dstPath, subdir)
-
+	} else {
 		if debug {
-			fmt.Printf("  📁 %s\n", subdir)
+			fmt.Printf("📤 Enviando %d subpasta(s) modificada(s)\n", len(dirsToSync))
 		}
 
-		// Use existing CopyToContainer for each subdirectory
-		if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstSubPath); err != nil {
-			return fmt.Errorf("erro ao copiar %s: %w", subdir, err)
+		// Copy only changed directories
+		for _, subdir := range dirsToSync {
+			srcPath := filepath.Join(srcDir, subdir)
+			dstSubPath := filepath.Join(dstPath, subdir)
+
+			if debug {
+				fmt.Printf("  📁 %s\n", subdir)
+			}
+
+			// Use existing CopyToContainer for each subdirectory
+			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstSubPath); err != nil {
+				return fmt.Errorf("erro ao copiar %s: %w", subdir, err)
+			}
+		}
+	}
+
+	// Always copy root-level files (they don't have checksums)
+	rootFiles, err := getRootLevelFiles(srcDir)
+	if err != nil {
+		return fmt.Errorf("erro ao listar arquivos da raiz: %w", err)
+	}
+
+	if len(rootFiles) > 0 {
+		if debug {
+			fmt.Printf("📄 Enviando %d arquivo(s) da raiz\n", len(rootFiles))
+		}
+
+		for _, file := range rootFiles {
+			srcPath := filepath.Join(srcDir, file)
+			dstFilePath := filepath.Join(dstPath, file)
+
+			if debug {
+				fmt.Printf("  📄 %s\n", file)
+			}
+
+			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstFilePath); err != nil {
+				return fmt.Errorf("erro ao copiar arquivo raiz %s: %w", file, err)
+			}
 		}
 	}
 
@@ -85,6 +109,27 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 	}
 
 	return nil
+}
+
+// getRootLevelFiles returns list of files (not directories) in the root of srcDir
+func getRootLevelFiles(srcDir string) ([]string, error) {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			// Skip hidden files
+			name := entry.Name()
+			if name[0] != '.' {
+				files = append(files, name)
+			}
+		}
+	}
+
+	return files, nil
 }
 
 // calculateDirectoryChecksums calculates SHA256 checksums for each subdirectory
@@ -124,6 +169,7 @@ func calculateDirectoryChecksums(rootDir string, debug bool) (TChecksumMap, erro
 }
 
 // calculateDirChecksum calculates a checksum for all files in a directory recursively
+// Includes both file contents and directory structure (subdirectory names)
 func calculateDirChecksum(dirPath string) (string, error) {
 	hash := sha256.New()
 
@@ -132,23 +178,28 @@ func calculateDirChecksum(dirPath string) (string, error) {
 			return err
 		}
 
-		if info.IsDir() {
-			return nil
-		}
-
-		// Include file path relative to dirPath in hash
+		// Include relative path in hash (for both files and directories)
 		relPath, _ := filepath.Rel(dirPath, path)
-		hash.Write([]byte(relPath))
+		if relPath != "." {
+			hash.Write([]byte(relPath))
 
-		// Include file content in hash
-		file, err := os.Open(path)
-		if err != nil {
-			return err
+			// Add marker to distinguish files from directories
+			if info.IsDir() {
+				hash.Write([]byte("/"))
+			}
 		}
-		defer file.Close()
 
-		if _, err := io.Copy(hash, file); err != nil {
-			return err
+		// For files, include content in hash
+		if !info.IsDir() {
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+
+			if _, err := io.Copy(hash, file); err != nil {
+				return err
+			}
 		}
 
 		return nil
