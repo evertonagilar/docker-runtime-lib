@@ -645,25 +645,34 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
 
-	src = normalizeCopySrcPath(src)
-	src = filepath.ToSlash(src)
+	// Resolve absolute path to properly split dir and file
+	absSrc, err := filepath.Abs(src)
+	if err != nil {
+		return fmt.Errorf("erro ao obter caminho absoluto de %s: %w", src, err)
+	}
+
+	workDir := filepath.Dir(absSrc)
+	fileName := filepath.Base(absSrc)
 
 	// Check if source is a directory
-	srcInfo, err := os.Stat(src)
+	srcInfo, err := os.Stat(absSrc)
 	if err != nil {
 		return fmt.Errorf("erro ao verificar origem: %w", err)
 	}
 
 	// For directories or when atomic copy is not needed, use direct copy
 	if srcInfo.IsDir() || !useAtomicCopy {
-		copyArgs := []string{"cp", src, fmt.Sprintf("%s:%s", podOrContainerName, dst)}
+		copyArgs := []string{"cp", fileName, fmt.Sprintf("%s:%s", podOrContainerName, dst)}
 		if mainContainerName != "" {
 			copyArgs = append(copyArgs, "-c", mainContainerName)
 		}
 		copyArgs = addNamespaceArg(namespace, copyArgs)
+
 		copyCmd := r.buildKubectlCmd(false, copyArgs...)
+		copyCmd.Dir = workDir // Execute from source directory
 		copyCmd.Stdout = os.Stdout
 		copyCmd.Stderr = os.Stderr
+
 		if err := copyCmd.Run(); err != nil {
 			if srcInfo.IsDir() {
 				return fmt.Errorf("erro ao copiar diretório para o pod: %w", err)
@@ -680,14 +689,17 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 	tmpDestPath := path.Join(destDir, tmpName)
 
 	// Copia o arquivo para o container com nome temporário
-	copyArgs := []string{"cp", src, fmt.Sprintf("%s:%s", podOrContainerName, tmpDestPath)}
+	copyArgs := []string{"cp", fileName, fmt.Sprintf("%s:%s", podOrContainerName, tmpDestPath)}
 	if mainContainerName != "" {
 		copyArgs = append(copyArgs, "-c", mainContainerName)
 	}
 	copyArgs = addNamespaceArg(namespace, copyArgs)
+
 	copyCmd := r.buildKubectlCmd(false, copyArgs...)
+	copyCmd.Dir = workDir // Execute from source directory
 	copyCmd.Stdout = os.Stdout
 	copyCmd.Stderr = os.Stderr
+
 	if err := copyCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao copiar arquivo temporário para o pod: %w", err)
 	}
@@ -699,6 +711,7 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 	}
 	mvArgs = append(mvArgs, "--", "mv", "-f", tmpDestPath, dst)
 	mvArgs = addNamespaceArg(namespace, mvArgs)
+
 	mvCmd := r.buildKubectlCmd(false, mvArgs...)
 	mvCmd.Stdout = os.Stdout
 	mvCmd.Stderr = os.Stderr
