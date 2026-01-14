@@ -24,13 +24,14 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	// 1. Check file size first (just for logging/debug)
 	fileSize, err := r.getRemoteFileSize(src, podOrContainerName, mainContainerName, namespace)
 
-	// 2. Setup execution command: base64 <file>
+	// 2. Setup execution command: base64 -w 0 <file>
 	// Using base64 ensures file integrity and avoids line-ending issues (CRLF vs LF)
+	// -w 0 disables line wrapping (default is 76 chars), which is critical for proper decoding
 	execArgs := []string{"exec", podOrContainerName}
 	if mainContainerName != "" {
 		execArgs = append(execArgs, "-c", mainContainerName)
 	}
-	execArgs = append(execArgs, "--", "base64", src)
+	execArgs = append(execArgs, "--", "base64", "-w", "0", src)
 	execArgs = addNamespaceArg(namespace, execArgs)
 
 	cmd := r.buildKubectlCmd(true, execArgs...)
