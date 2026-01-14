@@ -182,6 +182,7 @@ func (r DockerRuntime) CopyToContainer(src, podOrContainerName, mainContainerNam
 	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
 		return err
 	}
+	src = normalizeCopySrcPath(src)
 	targetName := podOrContainerName
 	if targetName == "" {
 		return fmt.Errorf("nome do container não informado")
@@ -210,6 +211,7 @@ func (r DockerRuntime) CopyToHost(src, podOrContainerName, mainContainerName, na
 	if err := ensureMainContainerNameEmpty(mainContainerName); err != nil {
 		return err
 	}
+	dst = normalizeCopyDstPath(dst)
 	targetName := podOrContainerName
 	if targetName == "" {
 		return fmt.Errorf("nome do container não informado")

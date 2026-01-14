@@ -3,7 +3,10 @@ package container
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -132,4 +135,56 @@ func isLoopbackHost(host string) bool {
 	}
 
 	return false
+}
+
+// normalizeCopySrcPath normalizes local source path for Windows compatibility
+func normalizeCopySrcPath(src string) string {
+	if runtime.GOOS != "windows" {
+		return src
+	}
+	if !strings.Contains(src, ":") {
+		return src
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return src
+	}
+	rel, err := filepath.Rel(cwd, src)
+	if err != nil {
+		return src
+	}
+	if rel == "" {
+		return "."
+	}
+	if strings.Contains(rel, ":") {
+		return src
+	}
+	return rel
+}
+
+// normalizeCopyDstPath normalizes local destination path for Windows compatibility
+func normalizeCopyDstPath(dst string) string {
+	if runtime.GOOS != "windows" {
+		return dst
+	}
+	if !strings.Contains(dst, ":") {
+		return dst
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return dst
+	}
+	rel, err := filepath.Rel(cwd, dst)
+	if err != nil {
+		return dst
+	}
+	if rel == "" {
+		return "."
+	}
+	if strings.Contains(rel, ":") {
+		return dst
+	}
+	return rel
 }

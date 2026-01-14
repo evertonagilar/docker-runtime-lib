@@ -645,6 +645,7 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
 
+	src = normalizeCopySrcPath(src)
 	src = filepath.ToSlash(src)
 
 	// Check if source is a directory

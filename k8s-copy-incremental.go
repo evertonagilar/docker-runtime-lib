@@ -16,6 +16,7 @@ type TChecksumMap map[string]string
 // CopyToContainerIncremental copies a directory to a container incrementally.
 // It calculates checksums for each subdirectory and only copies those that have changed.
 func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName, mainContainerName, namespace, dstPath string, debug bool) error {
+	srcDir = normalizeCopySrcPath(srcDir)
 	if debug {
 		fmt.Printf("📊 Calculando checksums do código fonte em %s\n", srcDir)
 	}

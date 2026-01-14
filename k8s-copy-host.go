@@ -18,6 +18,8 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
 
+	dst = normalizeCopyDstPath(dst)
+
 	// 1. Check file size first (just for logging/debug)
 	fileSize, err := r.getRemoteFileSize(src, podOrContainerName, mainContainerName, namespace)
 	if err == nil && r.config.Debug {
