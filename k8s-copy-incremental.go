@@ -20,6 +20,46 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 		fmt.Printf("📊 Calculando checksums do código fonte em %s\n", srcDir)
 	}
 
+	// Check for lock file indicating interrupted previous copy
+	lockFile := filepath.Join(dstPath, ".copy-incremental.lock")
+	lockExists, err := r.checkRemoteFileExists(lockFile, podOrContainerName, mainContainerName, namespace)
+	if err == nil && lockExists {
+		if debug {
+			fmt.Println("⚠️  Detectada cópia incremental interrompida (arquivo de lock encontrado)")
+			fmt.Println("📤 Fazendo cópia completa para garantir integridade")
+		}
+		// Remove lock file and do full copy
+		r.removeRemoteFile(lockFile, podOrContainerName, mainContainerName, namespace)
+
+		// Calculate checksums for saving later
+		localChecksums, err := calculateDirectoryChecksums(srcDir, debug)
+		if err != nil {
+			return fmt.Errorf("erro ao calcular checksums locais: %w", err)
+		}
+
+		// Do full copy
+		if err := r.CopyToContainer(srcDir, podOrContainerName, mainContainerName, namespace, dstPath, false); err != nil {
+			return fmt.Errorf("erro ao copiar código fonte completo: %w", err)
+		}
+
+		// Save checksums
+		checksumFile := filepath.Join(dstPath, ".checksums.json")
+		if err := r.saveRemoteChecksums(checksumFile, localChecksums, podOrContainerName, mainContainerName, namespace, debug); err != nil {
+			return fmt.Errorf("erro ao salvar checksums remotos: %w", err)
+		}
+
+		return nil
+	}
+
+	// Create lock file to detect interruptions
+	if err := r.createRemoteLockFile(lockFile, podOrContainerName, mainContainerName, namespace, debug); err != nil {
+		if debug {
+			fmt.Printf("⚠️  Não foi possível criar arquivo de lock: %v\n", err)
+		}
+	}
+	// Ensure lock file is removed at the end
+	defer r.removeRemoteFile(lockFile, podOrContainerName, mainContainerName, namespace)
+
 	// Calculate checksums for all subdirectories in srcDir
 	localChecksums, err := calculateDirectoryChecksums(srcDir, debug)
 	if err != nil {
@@ -293,5 +333,58 @@ func (r KubernetesRuntime) saveRemoteChecksums(checksumFile string, checksums TC
 		fmt.Printf("💾 Checksums salvos em %s\n", checksumFile)
 	}
 
+	return nil
+}
+
+// checkRemoteFileExists checks if a file exists in the container
+func (r KubernetesRuntime) checkRemoteFileExists(filePath, podOrContainerName, mainContainerName, namespace string) (bool, error) {
+	execArgs := []string{"exec", podOrContainerName}
+	if mainContainerName != "" {
+		execArgs = append(execArgs, "-c", mainContainerName)
+	}
+	execArgs = append(execArgs, "--", "test", "-f", filePath)
+	execArgs = addNamespaceArg(namespace, execArgs)
+
+	cmd := r.buildKubectlCmd(true, execArgs...)
+	err := cmd.Run()
+	if err != nil {
+		// Exit code 1 means file doesn't exist
+		return false, nil
+	}
+	return true, nil
+}
+
+// createRemoteLockFile creates a lock file in the container
+func (r KubernetesRuntime) createRemoteLockFile(lockFile, podOrContainerName, mainContainerName, namespace string, debug bool) error {
+	execArgs := []string{"exec", podOrContainerName}
+	if mainContainerName != "" {
+		execArgs = append(execArgs, "-c", mainContainerName)
+	}
+	execArgs = append(execArgs, "--", "touch", lockFile)
+	execArgs = addNamespaceArg(namespace, execArgs)
+
+	cmd := r.buildKubectlCmd(true, execArgs...)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	if debug {
+		fmt.Printf("🔒 Arquivo de lock criado: %s\n", lockFile)
+	}
+
+	return nil
+}
+
+// removeRemoteFile removes a file from the container
+func (r KubernetesRuntime) removeRemoteFile(filePath, podOrContainerName, mainContainerName, namespace string) error {
+	execArgs := []string{"exec", podOrContainerName}
+	if mainContainerName != "" {
+		execArgs = append(execArgs, "-c", mainContainerName)
+	}
+	execArgs = append(execArgs, "--", "rm", "-f", filePath)
+	execArgs = addNamespaceArg(namespace, execArgs)
+
+	cmd := r.buildKubectlCmd(true, execArgs...)
+	_ = cmd.Run() // Ignora erro se arquivo não existir
 	return nil
 }
