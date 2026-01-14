@@ -71,6 +71,17 @@ func (r KubernetesRuntime) CopyToContainerIncremental(srcDir, podOrContainerName
 				fmt.Printf("  📁 %s\n", subdir)
 			}
 
+			// Remove existing directory in container to avoid conflicts
+			execArgs := []string{"exec", podOrContainerName}
+			if mainContainerName != "" {
+				execArgs = append(execArgs, "-c", mainContainerName)
+			}
+			execArgs = append(execArgs, "--", "rm", "-rf", dstSubPath)
+			execArgs = addNamespaceArg(namespace, execArgs)
+
+			cmd := r.buildKubectlCmd(true, execArgs...)
+			_ = cmd.Run() // Ignora erro se pasta não existir
+
 			// Use existing CopyToContainer for each subdirectory
 			if err := r.CopyToContainer(srcPath, podOrContainerName, mainContainerName, namespace, dstSubPath); err != nil {
 				return fmt.Errorf("erro ao copiar %s: %w", subdir, err)
@@ -168,45 +179,45 @@ func calculateDirectoryChecksums(rootDir string, debug bool) (TChecksumMap, erro
 	return checksums, nil
 }
 
-// calculateDirChecksum calculates a checksum for all files in a directory recursively
-// Includes both file contents and directory structure (subdirectory names)
+// calculateDirChecksum calculates a checksum for files in the first level of a directory
+// Only includes direct children (non-recursive) for safety and performance
 func calculateDirChecksum(dirPath string) (string, error) {
 	hash := sha256.New()
 
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Include relative path in hash (for both files and directories)
-		relPath, _ := filepath.Rel(dirPath, path)
-		if relPath != "." {
-			hash.Write([]byte(relPath))
-
-			// Add marker to distinguish files from directories
-			if info.IsDir() {
-				hash.Write([]byte("/"))
-			}
-		}
-
-		// For files, include content in hash
-		if !info.IsDir() {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			if _, err := io.Copy(hash, file); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-
+	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return "", err
+	}
+
+	// Sort entries for consistent ordering
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+
+	// Process in sorted order for consistency
+	for _, name := range names {
+		entryPath := filepath.Join(dirPath, name)
+		info, err := os.Stat(entryPath)
+		if err != nil {
+			continue // Skip if can't stat
+		}
+
+		// Include name in hash
+		hash.Write([]byte(name))
+
+		// Mark if it's a directory
+		if info.IsDir() {
+			hash.Write([]byte("/"))
+		} else {
+			// For files, include content
+			file, err := os.Open(entryPath)
+			if err != nil {
+				continue // Skip if can't open
+			}
+			io.Copy(hash, file)
+			file.Close()
+		}
 	}
 
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
