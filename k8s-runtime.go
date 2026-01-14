@@ -637,6 +637,30 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 	}
 
 	src = filepath.ToSlash(src)
+
+	// Check if source is a directory
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("erro ao verificar origem: %w", err)
+	}
+
+	// For directories, use direct copy (kubectl cp handles it)
+	if srcInfo.IsDir() {
+		copyArgs := []string{"cp", src, fmt.Sprintf("%s:%s", podOrContainerName, dst)}
+		if mainContainerName != "" {
+			copyArgs = append(copyArgs, "-c", mainContainerName)
+		}
+		copyArgs = addNamespaceArg(namespace, copyArgs)
+		copyCmd := r.buildKubectlCmd(false, copyArgs...)
+		copyCmd.Stdout = os.Stdout
+		copyCmd.Stderr = os.Stderr
+		if err := copyCmd.Run(); err != nil {
+			return fmt.Errorf("erro ao copiar diretório para o pod: %w", err)
+		}
+		return nil
+	}
+
+	// For files, use temporary file + atomic move
 	destDir := path.Dir(dst)
 	tmpName := filepath.Base(dst) + ".tmp"
 	tmpDestPath := path.Join(destDir, tmpName)
