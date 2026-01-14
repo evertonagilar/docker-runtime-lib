@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -23,12 +24,13 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	// 1. Check file size first (just for logging/debug)
 	fileSize, err := r.getRemoteFileSize(src, podOrContainerName, mainContainerName, namespace)
 
-	// 2. Setup execution command: cat <file>
+	// 2. Setup execution command: base64 <file>
+	// Using base64 ensures file integrity and avoids line-ending issues (CRLF vs LF)
 	execArgs := []string{"exec", podOrContainerName}
 	if mainContainerName != "" {
 		execArgs = append(execArgs, "-c", mainContainerName)
 	}
-	execArgs = append(execArgs, "--", "cat", src)
+	execArgs = append(execArgs, "--", "base64", src)
 	execArgs = addNamespaceArg(namespace, execArgs)
 
 	cmd := r.buildKubectlCmd(true, execArgs...)
@@ -57,8 +59,9 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 	defer outFile.Close()
 
-	// 6. Copy content directly from stdout to file
-	copied, err := io.Copy(outFile, stdout)
+	// 6. Copy content from stdout passing through base64 decoder
+	decoder := base64.NewDecoder(base64.StdEncoding, stdout)
+	copied, err := io.Copy(outFile, decoder)
 	if err != nil {
 		return fmt.Errorf("erro ao escrever dados no arquivo: %w", err)
 	}
