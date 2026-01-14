@@ -48,7 +48,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 
 	for offset < fileSize {
 		remaining := fileSize - offset
-		currentBlockSize := blockSize
+		currentBlockSize := int64(blockSize)
 		if remaining < blockSize {
 			currentBlockSize = remaining
 		}
@@ -64,33 +64,40 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		var lastErr error
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
-			chunkData, lastErr = r.downloadChunk(src, offset, currentBlockSize, podOrContainerName, mainContainerName, namespace)
+			chunkData, lastErr = r.downloadChunk(src, offset, int(currentBlockSize), podOrContainerName, mainContainerName, namespace)
 			if lastErr == nil {
 				break
 			}
 			if attempt < maxRetries {
 				if r.config.Debug {
 					fmt.Printf("⚠️  Tentativa %d/%d falhou para bloco %d: %v. Tentando novamente...\n",
-						attempt, maxRetries, chunkNum, lastErr)
+						attempt, maxRetries, blockNum, lastErr)
 				}
 				time.Sleep(time.Duration(attempt) * time.Second) // Backoff
 			}
 		}
 
 		if lastErr != nil {
-			return fmt.Errorf("erro ao baixar bloco %d após %d tentativas: %w", chunkNum, maxRetries, lastErr)
+			return fmt.Errorf("erro ao baixar bloco %d após %d tentativas: %w", blockNum, maxRetries, lastErr)
 		}
 
 		// Write chunk to file
 		if _, err := outFile.Write(chunkData); err != nil {
-			return fmt.Errorf("erro ao escrever bloco %d no arquivo: %w", chunkNum, err)
+			return fmt.Errorf("erro ao escrever bloco %d no arquivo: %w", blockNum, err)
 		}
 
-		offset += int64(len(chunkData))
+		offset += currentBlockSize
+		blockNum++
+
+		// Progress update
+		if r.config.Debug && blockNum%5 == 0 {
+			progress := float64(offset) / float64(fileSize) * 100
+			fmt.Printf("📊 Progresso: %.1f%% (%d/%d blocos)\n", progress, blockNum-1, totalBlocks)
+		}
 	}
 
 	if r.config.Debug {
-		fmt.Printf("✅ Download completo: %d bytes em %d blocos\n", fileSize, chunkNum)
+		fmt.Printf("✅ Download completo: %d bytes em %d blocos\n", fileSize, blockNum-1)
 	}
 
 	return nil
