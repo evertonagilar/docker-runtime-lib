@@ -46,14 +46,7 @@ type TContainerRuntime interface {
 	CreateNamespace(namespace string) error
 }
 
-type TVolume struct {
-    HostPath     string
-    MountPath    string
-    ReadOnly     bool
-    Size         string
-    StorageClass string
-    InMemory     bool
-}
+
 ```
 
 ### Function Descriptions
