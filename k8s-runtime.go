@@ -3,7 +3,6 @@ package container
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -667,60 +666,6 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 	mvCmd.Stderr = os.Stderr
 	if err := mvCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao mover arquivo dentro do pod: %w", err)
-	}
-
-	return nil
-}
-
-func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error {
-	if podOrContainerName == "" {
-		return fmt.Errorf("nome do pod deve ser informado")
-	}
-
-	// Use base64 encoding to avoid tar issues on Windows
-	// kubectl exec pod -- base64 /file > local.base64
-	execArgs := []string{"exec", podOrContainerName}
-	if mainContainerName != "" {
-		execArgs = append(execArgs, "-c", mainContainerName)
-	}
-	execArgs = append(execArgs, "--", "base64", src)
-	execArgs = addNamespaceArg(namespace, execArgs)
-
-	cmd := r.buildKubectlCmd(true, execArgs...)
-
-	// Debug: show command
-	fmt.Printf("🔨 Comando kubectl exec base64: %s %s\n", cmd.Path, strings.Join(cmd.Args[1:], " "))
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		stderrStr := strings.TrimSpace(stderr.String())
-		return fmt.Errorf("erro ao executar base64 no pod: %w. stderr: %s", err, stderrStr)
-	}
-
-	// Clean base64 content: remove all whitespace (spaces, newlines, tabs)
-	// This handles cases where base64 output has line breaks or mixed with warnings
-	base64Content := stdout.Bytes()
-	cleanedBase64 := make([]byte, 0, len(base64Content))
-	for _, b := range base64Content {
-		// Keep only valid base64 characters: A-Z, a-z, 0-9, +, /, =
-		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '+' || b == '/' || b == '=' {
-			cleanedBase64 = append(cleanedBase64, b)
-		}
-	}
-
-	// Decode base64 content
-	decodedContent := make([]byte, base64.StdEncoding.DecodedLen(len(cleanedBase64)))
-	n, err := base64.StdEncoding.Decode(decodedContent, cleanedBase64)
-	if err != nil {
-		return fmt.Errorf("erro ao decodificar base64: %w (tamanho original: %d, limpo: %d)", err, len(base64Content), len(cleanedBase64))
-	}
-
-	// Write to destination file
-	if err := os.WriteFile(dst, decodedContent[:n], 0644); err != nil {
-		return fmt.Errorf("erro ao escrever arquivo: %w", err)
 	}
 
 	return nil
