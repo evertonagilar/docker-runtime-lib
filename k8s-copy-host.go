@@ -59,13 +59,23 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	return r.copyToHostUsingRsync(src, podOrContainerName, mainContainerName, namespace, dst)
 }
 
-func (r KubernetesRuntime) copyToHostUsingTar(src, pod, container, namespace, dst string) error {
+func (r KubernetesRuntime) copyToHostUsingTar(
+	src,
+	pod,
+	container,
+	namespace,
+	dst string,
+) error {
+
 	if r.config.Debug {
-		fmt.Println("📦 Usando tar seguro (Windows)")
+		fmt.Println("📦 Usando tar seguro (cross-platform)")
 	}
 
-	// kubectl exec args
+	// -----------------------------
+	// 1) Monta kubectl exec ... tar
+	// -----------------------------
 	execArgs := []string{"exec", "-i", pod}
+
 	if container != "" {
 		execArgs = append(execArgs, "-c", container)
 	}
@@ -83,14 +93,31 @@ func (r KubernetesRuntime) copyToHostUsingTar(src, pod, container, namespace, ds
 		srcFile = src[idx+1:]
 	}
 
-	execArgs = append(execArgs, "--", "tar", "-cf", "-", "-C", srcDir, srcFile)
+	execArgs = append(
+		execArgs,
+		"--",
+		"tar", "-cf", "-",
+		"-C", srcDir,
+		srcFile,
+	)
 
 	kubectlCmd := r.buildKubectlCmd(true, execArgs...)
 
+	if r.config.Debug {
+		fmt.Printf("🔨 Executando: %s %s\n",
+			kubectlCmd.Path,
+			strings.Join(kubectlCmd.Args[1:], " "),
+		)
+	}
+
+	// -----------------------------
+	// 2) Recebe stream TAR em arquivo
+	// -----------------------------
 	tmpTar := dst + ".tar"
+
 	outFile, err := os.Create(tmpTar)
 	if err != nil {
-		return err
+		return fmt.Errorf("erro ao criar arquivo temporário: %w", err)
 	}
 	defer outFile.Close()
 
@@ -98,15 +125,43 @@ func (r KubernetesRuntime) copyToHostUsingTar(src, pod, container, namespace, ds
 	kubectlCmd.Stderr = os.Stderr
 
 	if r.config.Debug {
-		fmt.Println("⏳ Recebendo stream tar...")
+		fmt.Printf("⏳ Gravando stream em: %s\n", tmpTar)
 	}
 
 	if err := kubectlCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao executar kubectl: %w", err)
 	}
 
-	// Agora extrai SEM pipe
-	tarCmd := exec.Command("tar", "-xf", tmpTar, "-C", filepath.Dir(dst))
+	// -----------------------------
+	// 3) Seleciona tar local
+	// -----------------------------
+	tarPath := "tar"
+	if runtime.GOOS == "windows" {
+		systemRoot := os.Getenv("SystemRoot")
+		if systemRoot == "" {
+			systemRoot = "C:\\Windows"
+		}
+		tarPath = filepath.Join(systemRoot, "System32", "tar.exe")
+	}
+
+	// -----------------------------
+	// 4) Extrai TAR localmente
+	// -----------------------------
+	extractDir := filepath.Dir(dst)
+
+	tarCmd := exec.Command(
+		tarPath,
+		"-xf", tmpTar,
+		"-C", extractDir,
+	)
+
+	if r.config.Debug {
+		fmt.Printf("📂 Executando: %s %s\n",
+			tarCmd.Path,
+			strings.Join(tarCmd.Args[1:], " "),
+		)
+	}
+
 	tarCmd.Stdout = os.Stdout
 	tarCmd.Stderr = os.Stderr
 
@@ -117,7 +172,7 @@ func (r KubernetesRuntime) copyToHostUsingTar(src, pod, container, namespace, ds
 	_ = os.Remove(tmpTar)
 
 	if r.config.Debug {
-		fmt.Printf("✅ Arquivo copiado com sucesso: %s -> %s\n", src, dst)
+		fmt.Printf("✅ Arquivo copiado com sucesso: %s → %s\n", src, dst)
 	}
 
 	return nil
