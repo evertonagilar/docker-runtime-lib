@@ -23,7 +23,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 	cpArgs = addNamespaceArg(namespace, cpArgs)
 
-	cmd := r.buildKubectlCmd(true, cpArgs...)
+	cmd := r.buildKubectlCmd(false, cpArgs...)
 
 	if err := r.runKubectlCommand(cmd, "erro ao copiar arquivo do pod"); err != nil {
 		return err
