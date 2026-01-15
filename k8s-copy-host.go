@@ -59,23 +59,20 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	return r.copyToHostUsingRsync(src, podOrContainerName, mainContainerName, namespace, dst)
 }
 
-// copyToHostUsingTar copies a file using tar through kubectl exec (Windows-compatible)
-func (r KubernetesRuntime) copyToHostUsingTar(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+func (r KubernetesRuntime) copyToHostUsingTar(src, pod, container, namespace, dst string) error {
 	if r.config.Debug {
-		fmt.Printf("📦 Usando tar para transferência (Windows)\n")
+		fmt.Println("📦 Usando tar seguro (Windows)")
 	}
 
-	// Build kubectl exec command to tar the file
-	execArgs := []string{"exec", "-i", podOrContainerName}
-	if mainContainerName != "" {
-		execArgs = append(execArgs, "-c", mainContainerName)
+	// kubectl exec args
+	execArgs := []string{"exec", "-i", pod}
+	if container != "" {
+		execArgs = append(execArgs, "-c", container)
 	}
 	if namespace != "" {
 		execArgs = append(execArgs, "-n", namespace)
 	}
 
-	// Get the directory and filename (use Unix path separator for remote paths)
-	// filepath.Dir/Base use OS-specific separators, but src is a Unix path from the pod
 	srcDir := "/"
 	srcFile := src
 	if idx := strings.LastIndex(src, "/"); idx >= 0 {
@@ -86,54 +83,38 @@ func (r KubernetesRuntime) copyToHostUsingTar(src, podOrContainerName, mainConta
 		srcFile = src[idx+1:]
 	}
 
-	// Tar command: tar -cf - -C /dir filename
 	execArgs = append(execArgs, "--", "tar", "-cf", "-", "-C", srcDir, srcFile)
 
-	if r.config.Debug {
-		fmt.Printf("🔨 Comando kubectl: kubectl %s\n", strings.Join(execArgs, " "))
-	}
-
-	// Create kubectl command
 	kubectlCmd := r.buildKubectlCmd(true, execArgs...)
 
-	// Create tar extraction command
-	tarCmd := exec.Command("tar", "-xf", "-", "-C", filepath.Dir(dst))
-
-	// Pipe kubectl stdout to tar stdin
-	var err error
-	tarCmd.Stdin, err = kubectlCmd.StdoutPipe()
+	tmpTar := dst + ".tar"
+	outFile, err := os.Create(tmpTar)
 	if err != nil {
-		return fmt.Errorf("erro ao criar pipe: %w", err)
+		return err
 	}
+	defer outFile.Close()
 
-	tarCmd.Stdout = os.Stdout
-	tarCmd.Stderr = os.Stderr
+	kubectlCmd.Stdout = outFile
 	kubectlCmd.Stderr = os.Stderr
 
 	if r.config.Debug {
-		fmt.Printf("⏳ Iniciando transferência via tar (pipe direto)...\n")
+		fmt.Println("⏳ Recebendo stream tar...")
 	}
 
-	// Start tar extraction
-	if err := tarCmd.Start(); err != nil {
-		return fmt.Errorf("erro ao iniciar tar: %w", err)
-	}
-
-	// Start kubectl
 	if err := kubectlCmd.Run(); err != nil {
-		if r.config.Debug {
-			fmt.Printf("❌ Erro ao executar kubectl: %v\n", err)
-		}
 		return fmt.Errorf("erro ao executar kubectl: %w", err)
 	}
 
-	// Wait for tar to finish
-	if err := tarCmd.Wait(); err != nil {
-		if r.config.Debug {
-			fmt.Printf("❌ Erro ao extrair tar: %v\n", err)
-		}
+	// Agora extrai SEM pipe
+	tarCmd := exec.Command("tar", "-xf", tmpTar, "-C", filepath.Dir(dst))
+	tarCmd.Stdout = os.Stdout
+	tarCmd.Stderr = os.Stderr
+
+	if err := tarCmd.Run(); err != nil {
 		return fmt.Errorf("erro ao extrair tar: %w", err)
 	}
+
+	_ = os.Remove(tmpTar)
 
 	if r.config.Debug {
 		fmt.Printf("✅ Arquivo copiado com sucesso: %s -> %s\n", src, dst)
