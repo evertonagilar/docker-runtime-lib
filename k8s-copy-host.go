@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // CopyToHost copies a file from a pod to the host.
@@ -125,6 +126,11 @@ func (r KubernetesRuntime) copyToHostUsingTar(
 	// 🔴 2) FECHA O ARQUIVO (ESSENCIAL!)
 	if err := outFile.Close(); err != nil {
 		return fmt.Errorf("erro ao fechar tar: %w", err)
+	}
+
+	// 🔴 3) AGUARDA SYNC DO FILESYSTEM (Windows)
+	if runtime.GOOS == "windows" {
+		time.Sleep(1 * time.Second)
 	}
 
 	// --- tar local (Windows nativo) ---
