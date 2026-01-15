@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// CopyToHost copies a file from a pod to the host using rsync over kubectl exec.
-// This ensures binary integrity and handles large files efficiently.
+// CopyToHost copies a file from a pod to the host.
+// On Windows, uses tar for better compatibility. On Unix/Linux, uses rsync for efficiency.
 func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error {
 	if r.config.Debug {
 		fmt.Printf("🔍 CopyToHost iniciado:\n")
@@ -28,11 +28,6 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 
 	if podOrContainerName == "" {
 		return fmt.Errorf("nome do pod deve ser informado")
-	}
-
-	dst = normalizeCopyDstPath(dst)
-	if r.config.Debug && dst != dst {
-		fmt.Printf("   Destino normalizado: %s\n", dst)
 	}
 
 	// Get file size for progress reporting
@@ -57,8 +52,97 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		return fmt.Errorf("erro ao criar diretório de destino: %w", err)
 	}
 
+	// Use different approaches for Windows vs Unix/Linux
+	if runtime.GOOS == "windows" {
+		return r.copyToHostUsingTar(src, podOrContainerName, mainContainerName, namespace, dst)
+	}
+	return r.copyToHostUsingRsync(src, podOrContainerName, mainContainerName, namespace, dst)
+}
+
+// copyToHostUsingTar copies a file using tar through kubectl exec (Windows-compatible)
+func (r KubernetesRuntime) copyToHostUsingTar(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+	if r.config.Debug {
+		fmt.Printf("📦 Usando tar para transferência (Windows)\n")
+	}
+
+	// Build kubectl exec command to tar the file
+	execArgs := []string{"exec", "-i", podOrContainerName}
+	if mainContainerName != "" {
+		execArgs = append(execArgs, "-c", mainContainerName)
+	}
+	if namespace != "" {
+		execArgs = append(execArgs, "-n", namespace)
+	}
+
+	// Get the directory and filename
+	srcDir := filepath.Dir(src)
+	srcFile := filepath.Base(src)
+
+	// Tar command: tar -cf - -C /dir filename
+	execArgs = append(execArgs, "--", "tar", "-cf", "-", "-C", srcDir, srcFile)
+
+	if r.config.Debug {
+		fmt.Printf("🔨 Comando kubectl: kubectl %s\n", strings.Join(execArgs, " "))
+	}
+
+	// Create kubectl command
+	cmd := r.buildKubectlCmd(true, execArgs...)
+
+	// Create output file
+	outFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("erro ao criar arquivo de destino: %w", err)
+	}
+	defer outFile.Close()
+
+	// Pipe kubectl output to tar extraction
+	cmd.Stdout = outFile
+	cmd.Stderr = os.Stderr
+
+	if r.config.Debug {
+		fmt.Printf("⏳ Iniciando transferência via tar...\n")
+	}
+
+	if err := cmd.Run(); err != nil {
+		if r.config.Debug {
+			fmt.Printf("❌ Erro ao executar kubectl/tar: %v\n", err)
+		}
+		return fmt.Errorf("erro ao executar kubectl/tar: %w", err)
+	}
+
+	// Extract the tar on the host side
+	if r.config.Debug {
+		fmt.Printf("📂 Extraindo arquivo tar...\n")
+	}
+
+	// Read the tar file and extract
+	tarCmd := exec.Command("tar", "-xf", dst, "-C", filepath.Dir(dst))
+	tarCmd.Stdout = os.Stdout
+	tarCmd.Stderr = os.Stderr
+
+	if err := tarCmd.Run(); err != nil {
+		if r.config.Debug {
+			fmt.Printf("❌ Erro ao extrair tar: %v\n", err)
+		}
+		return fmt.Errorf("erro ao extrair tar: %w", err)
+	}
+
+	if r.config.Debug {
+		fmt.Printf("✅ Arquivo copiado com sucesso: %s -> %s\n", src, dst)
+	}
+
+	return nil
+}
+
+// copyToHostUsingRsync copies a file using rsync (Unix/Linux only)
+func (r KubernetesRuntime) copyToHostUsingRsync(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+	if r.config.Debug {
+		fmt.Printf("🔄 Usando rsync para transferência (Unix/Linux)\n")
+	}
+
+	dst = normalizeCopyDstPath(dst)
+
 	// Build rsync command using kubectl exec as transport
-	// rsync -av --progress -e "kubectl exec -i POD -- " :SRC DST
 	rsyncPath := getRsyncBinPath()
 	if r.config.Debug {
 		fmt.Printf("🔧 Binário rsync detectado: %s\n", rsyncPath)
@@ -73,29 +157,18 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		kubectlExec += fmt.Sprintf(" -n %s", namespace)
 	}
 	if r.config.Kubeconfig != "" {
-		// On Windows, wrap the kubeconfig path in quotes if it contains spaces
-		kubeconfigPath := r.config.Kubeconfig
-		if runtime.GOOS == "windows" && strings.Contains(kubeconfigPath, " ") {
-			kubeconfigPath = fmt.Sprintf("'%s'", kubeconfigPath)
-		}
-		kubectlExec += fmt.Sprintf(" --kubeconfig %s", kubeconfigPath)
+		kubectlExec += fmt.Sprintf(" --kubeconfig %s", r.config.Kubeconfig)
 	}
 	kubectlExec += " --"
-
-	// Normalize destination path for rsync (Cygwin/MSYS2 on Windows expect forward slashes)
-	rsyncDst := normalizeRsyncPath(dst)
-	if r.config.Debug && rsyncDst != dst {
-		fmt.Printf("📝 Destino normalizado para rsync: %s\n", rsyncDst)
-	}
 
 	rsyncCmd := []string{
 		rsyncPath,
 		"-av",
 		"--progress",
 		"-e",
-		kubectlExec, // This will be properly quoted as a single argument
+		kubectlExec,
 		fmt.Sprintf(":%s", src),
-		rsyncDst,
+		dst,
 	}
 
 	if r.config.Debug {
@@ -104,33 +177,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 
 	// Execute rsync
-	var cmd *exec.Cmd
-
-	if runtime.GOOS == "windows" {
-		// On Windows, we need to use a shell to properly handle the -e parameter
-		// Convert rsync path to Cygwin/MSYS2 format for shell execution
-		rsyncPathForShell := normalizeRsyncPath(rsyncPath)
-
-		// Build the full command as a string for the shell
-		shellCmd := fmt.Sprintf("%s -av --progress -e %s :%s %s",
-			shellQuote(rsyncPathForShell),
-			shellQuote(kubectlExec),
-			shellQuote(src),
-			shellQuote(rsyncDst))
-
-		if r.config.Debug {
-			fmt.Printf("🐚 Comando shell (Windows):\n")
-			fmt.Printf("   Caminho rsync para shell: %s\n", rsyncPathForShell)
-			fmt.Printf("   sh -c %s\n", shellQuote(shellCmd))
-		}
-
-		// Use sh from Cygwin/MSYS2
-		cmd = exec.Command("sh", "-c", shellCmd)
-	} else {
-		// On Unix-like systems, exec.Command handles arguments correctly
-		cmd = exec.Command(rsyncCmd[0], rsyncCmd[1:]...)
-	}
-
+	cmd := exec.Command(rsyncCmd[0], rsyncCmd[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
