@@ -94,41 +94,41 @@ func (r KubernetesRuntime) copyToHostUsingTar(src, podOrContainerName, mainConta
 	}
 
 	// Create kubectl command
-	cmd := r.buildKubectlCmd(true, execArgs...)
+	kubectlCmd := r.buildKubectlCmd(true, execArgs...)
 
-	// Create output file
-	outFile, err := os.Create(dst)
+	// Create tar extraction command
+	tarCmd := exec.Command("tar", "-xf", "-", "-C", filepath.Dir(dst))
+
+	// Pipe kubectl stdout to tar stdin
+	var err error
+	tarCmd.Stdin, err = kubectlCmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("erro ao criar arquivo de destino: %w", err)
-	}
-	defer outFile.Close()
-
-	// Pipe kubectl output to tar extraction
-	cmd.Stdout = outFile
-	cmd.Stderr = os.Stderr
-
-	if r.config.Debug {
-		fmt.Printf("⏳ Iniciando transferência via tar...\n")
+		return fmt.Errorf("erro ao criar pipe: %w", err)
 	}
 
-	if err := cmd.Run(); err != nil {
-		if r.config.Debug {
-			fmt.Printf("❌ Erro ao executar kubectl/tar: %v\n", err)
-		}
-		return fmt.Errorf("erro ao executar kubectl/tar: %w", err)
-	}
-
-	// Extract the tar on the host side
-	if r.config.Debug {
-		fmt.Printf("📂 Extraindo arquivo tar...\n")
-	}
-
-	// Read the tar file and extract
-	tarCmd := exec.Command("tar", "-xf", dst, "-C", filepath.Dir(dst))
 	tarCmd.Stdout = os.Stdout
 	tarCmd.Stderr = os.Stderr
+	kubectlCmd.Stderr = os.Stderr
 
-	if err := tarCmd.Run(); err != nil {
+	if r.config.Debug {
+		fmt.Printf("⏳ Iniciando transferência via tar (pipe direto)...\n")
+	}
+
+	// Start tar extraction
+	if err := tarCmd.Start(); err != nil {
+		return fmt.Errorf("erro ao iniciar tar: %w", err)
+	}
+
+	// Start kubectl
+	if err := kubectlCmd.Run(); err != nil {
+		if r.config.Debug {
+			fmt.Printf("❌ Erro ao executar kubectl: %v\n", err)
+		}
+		return fmt.Errorf("erro ao executar kubectl: %w", err)
+	}
+
+	// Wait for tar to finish
+	if err := tarCmd.Wait(); err != nil {
 		if r.config.Debug {
 			fmt.Printf("❌ Erro ao extrair tar: %v\n", err)
 		}
