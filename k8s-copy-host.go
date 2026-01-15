@@ -74,7 +74,7 @@ func (r KubernetesRuntime) copyToHostUsingTar(
 	// -----------------------------
 	// 1) Monta kubectl exec ... tar
 	// -----------------------------
-	execArgs := []string{"exec", "-i", pod}
+	execArgs := []string{"exec", pod}
 
 	if container != "" {
 		execArgs = append(execArgs, "-c", container)
