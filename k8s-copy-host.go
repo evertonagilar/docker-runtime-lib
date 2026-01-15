@@ -56,14 +56,16 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 
 	// Use different approaches for Windows vs Unix/Linux
 	if runtime.GOOS == "windows" {
-		// For large files (> 30MB), use chunked transfer
-		const chunkSizeLimit = 10 * 1024 * 1024 // 0MB
+		// For large files (> 10MB), use chunked transfer
+		const chunkSizeLimit = 10 * 1024 * 1024 // 10MB
 		if fileSize > chunkSizeLimit {
 			return r.copyToHostUsingChunks(src, podOrContainerName, mainContainerName, namespace, dst, fileSize)
 		}
 		return r.copyToHostUsingTar(src, podOrContainerName, mainContainerName, namespace, dst)
 	}
-	return r.copyToHostUsingRsync(src, podOrContainerName, mainContainerName, namespace, dst)
+
+	// Unix/Linux: use kubectl cp
+	return r.copyToHostUsingKubectlCp(src, podOrContainerName, mainContainerName, namespace, dst)
 }
 
 func (r KubernetesRuntime) copyToHostUsingTar(
@@ -442,66 +444,42 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 	return nil
 }
 
-// copyToHostUsingRsync copies a file using rsync (Unix/Linux only)
-func (r KubernetesRuntime) copyToHostUsingRsync(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+// copyToHostUsingKubectlCp copies a file using kubectl cp (Unix/Linux)
+func (r KubernetesRuntime) copyToHostUsingKubectlCp(src, podOrContainerName, mainContainerName, namespace, dst string) error {
 	if r.config.Debug {
-		fmt.Printf("🔄 Usando rsync para transferência (Unix/Linux)\n")
+		fmt.Printf("� Usando kubectl cp para transferência (Unix/Linux)\n")
 	}
 
-	dst = normalizeCopyDstPath(dst)
+	// Build kubectl cp command
+	cpArgs := []string{"cp"}
 
-	// Build rsync command using kubectl exec as transport
-	rsyncPath := getRsyncBinPath()
-	if r.config.Debug {
-		fmt.Printf("🔧 Binário rsync detectado: %s\n", rsyncPath)
-	}
-
-	// Build kubectl exec command for rsync transport
-	kubectlExec := fmt.Sprintf("kubectl exec -i %s", podOrContainerName)
-	if mainContainerName != "" {
-		kubectlExec += fmt.Sprintf(" -c %s", mainContainerName)
-	}
+	// Build source: namespace/pod:path or namespace/pod/container:path
+	source := ""
 	if namespace != "" {
-		kubectlExec += fmt.Sprintf(" -n %s", namespace)
+		source = namespace + "/"
 	}
-	if r.config.Kubeconfig != "" {
-		kubectlExec += fmt.Sprintf(" --kubeconfig %s", r.config.Kubeconfig)
+	source += podOrContainerName
+	if mainContainerName != "" {
+		source += "/" + mainContainerName
 	}
-	kubectlExec += " --"
+	source += ":" + src
 
-	rsyncCmd := []string{
-		rsyncPath,
-		"-av",
-		"--progress",
-		"-e",
-		kubectlExec,
-		fmt.Sprintf(":%s", src),
-		dst,
-	}
+	cpArgs = append(cpArgs, source, dst)
 
 	if r.config.Debug {
-		fmt.Printf("🔨 Executando comando rsync:\n")
-		fmt.Printf("   %s\n", strings.Join(rsyncCmd, " "))
+		fmt.Printf("🔨 Executando: kubectl %s\n", strings.Join(cpArgs, " "))
 	}
 
-	// Execute rsync
-	cmd := exec.Command(rsyncCmd[0], rsyncCmd[1:]...)
+	cmd := r.buildKubectlCmd(true, cpArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if r.config.Debug {
-		fmt.Printf("⏳ Iniciando transferência...\n")
-	}
-
 	if err := cmd.Run(); err != nil {
-		if r.config.Debug {
-			fmt.Printf("❌ Erro ao executar rsync: %v\n", err)
-		}
-		return fmt.Errorf("erro ao executar rsync: %w", err)
+		return fmt.Errorf("erro ao executar kubectl cp: %w", err)
 	}
 
 	if r.config.Debug {
-		fmt.Printf("✅ Arquivo copiado com sucesso: %s -> %s\n", src, dst)
+		fmt.Printf("✅ Arquivo copiado com sucesso: %s → %s\n", src, dst)
 	}
 
 	return nil
