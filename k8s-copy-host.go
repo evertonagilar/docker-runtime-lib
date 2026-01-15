@@ -447,22 +447,24 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 // copyToHostUsingKubectlCp copies a file using kubectl cp (Unix/Linux)
 func (r KubernetesRuntime) copyToHostUsingKubectlCp(src, podOrContainerName, mainContainerName, namespace, dst string) error {
 	if r.config.Debug {
-		fmt.Printf("� Usando kubectl cp para transferência (Unix/Linux)\n")
+		fmt.Printf("📋 Usando kubectl cp para transferência (Unix/Linux)\n")
 	}
 
 	// Build kubectl cp command
 	cpArgs := []string{"cp"}
 
-	// Build source: namespace/pod:path or namespace/pod/container:path
-	source := ""
-	if namespace != "" {
-		source = namespace + "/"
-	}
-	source += podOrContainerName
+	// Add container flag if specified
 	if mainContainerName != "" {
-		source += "/" + mainContainerName
+		cpArgs = append(cpArgs, "-c", mainContainerName)
 	}
-	source += ":" + src
+
+	// Add namespace flag if specified
+	if namespace != "" {
+		cpArgs = append(cpArgs, "-n", namespace)
+	}
+
+	// Build source: pod:path
+	source := podOrContainerName + ":" + src
 
 	cpArgs = append(cpArgs, source, dst)
 
