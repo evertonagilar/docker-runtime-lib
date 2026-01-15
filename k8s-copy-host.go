@@ -177,6 +177,62 @@ func (r KubernetesRuntime) copyToHostUsingTar(
 	return nil
 }
 
+// copyChunkToHost downloads a chunk file without extracting (just the raw tar stream)
+func (r KubernetesRuntime) copyChunkToHost(
+	src,
+	pod,
+	container,
+	namespace,
+	dst string,
+) error {
+
+	// --- kubectl exec tar ---
+	execArgs := []string{"exec", pod}
+
+	if container != "" {
+		execArgs = append(execArgs, "-c", container)
+	}
+	if namespace != "" {
+		execArgs = append(execArgs, "-n", namespace)
+	}
+
+	srcDir := "/"
+	srcFile := src
+	if idx := strings.LastIndex(src, "/"); idx >= 0 {
+		srcDir = src[:idx]
+		if srcDir == "" {
+			srcDir = "/"
+		}
+		srcFile = src[idx+1:]
+	}
+
+	execArgs = append(execArgs,
+		"--",
+		"tar", "-cf", "-",
+		"-C", srcDir,
+		srcFile,
+	)
+
+	kubectlCmd := r.buildKubectlCmd(true, execArgs...)
+
+	// Create output file directly (no .tar extension, no extraction)
+	outFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("erro ao criar arquivo chunk: %w", err)
+	}
+	defer outFile.Close()
+
+	kubectlCmd.Stdout = outFile
+	kubectlCmd.Stderr = os.Stderr
+
+	// Execute kubectl
+	if err := kubectlCmd.Run(); err != nil {
+		return fmt.Errorf("erro ao executar kubectl: %w", err)
+	}
+
+	return nil
+}
+
 // copyToHostUsingChunks transfers large files by splitting into 30MB chunks
 func (r KubernetesRuntime) copyToHostUsingChunks(
 	src,
@@ -263,7 +319,7 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 		fmt.Printf("⬇️  Transferindo chunk %d/%d...\n", i+1, len(chunks))
 
 		localChunk := dst + fmt.Sprintf(".chunk%03d", i)
-		err := r.copyToHostUsingTar(chunk, pod, container, namespace, localChunk)
+		err := r.copyChunkToHost(chunk, pod, container, namespace, localChunk)
 		if err != nil {
 			// Cleanup on error
 			for _, lc := range localChunks {
