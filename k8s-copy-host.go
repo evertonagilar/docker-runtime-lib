@@ -12,29 +12,59 @@ import (
 // CopyToHost copies a file from a pod to the host using rsync over kubectl exec.
 // This ensures binary integrity and handles large files efficiently.
 func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName, namespace, dst string) error {
+	if r.config.Debug {
+		fmt.Printf("🔍 CopyToHost iniciado:\n")
+		fmt.Printf("   Origem (pod): %s\n", src)
+		fmt.Printf("   Pod: %s\n", podOrContainerName)
+		if mainContainerName != "" {
+			fmt.Printf("   Container: %s\n", mainContainerName)
+		}
+		if namespace != "" {
+			fmt.Printf("   Namespace: %s\n", namespace)
+		}
+		fmt.Printf("   Destino (host): %s\n", dst)
+	}
+
 	if podOrContainerName == "" {
 		return fmt.Errorf("nome do pod deve ser informado")
 	}
 
 	dst = normalizeCopyDstPath(dst)
+	if r.config.Debug && dst != dst {
+		fmt.Printf("   Destino normalizado: %s\n", dst)
+	}
 
 	// Get file size for progress reporting
-	fileSize, _ := r.getRemoteFileSize(src, podOrContainerName, mainContainerName, namespace)
+	if r.config.Debug {
+		fmt.Printf("📏 Obtendo tamanho do arquivo remoto...\n")
+	}
+	fileSize, err := r.getRemoteFileSize(src, podOrContainerName, mainContainerName, namespace)
+	if err != nil && r.config.Debug {
+		fmt.Printf("⚠️  Não foi possível obter tamanho do arquivo: %v\n", err)
+	}
 
 	if r.config.Debug && fileSize > 0 {
-		fmt.Printf("📦 Copiando arquivo: %s (%.2f MB)\n", src, float64(fileSize)/(1024*1024))
+		fmt.Printf("📦 Tamanho do arquivo: %.2f MB (%d bytes)\n", float64(fileSize)/(1024*1024), fileSize)
 	}
 
 	// Create destination directory if needed
 	dstDir := filepath.Dir(dst)
+	if r.config.Debug {
+		fmt.Printf("📁 Criando diretório de destino: %s\n", dstDir)
+	}
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		return fmt.Errorf("erro ao criar diretório de destino: %w", err)
 	}
 
 	// Build rsync command using kubectl exec as transport
 	// rsync -av --progress -e "kubectl exec -i POD -- " :SRC DST
+	rsyncPath := getRsyncBinPath()
+	if r.config.Debug {
+		fmt.Printf("🔧 Binário rsync detectado: %s\n", rsyncPath)
+	}
+
 	rsyncCmd := []string{
-		"/usr/bin/rsync",
+		rsyncPath,
 		"-av",
 		"--progress",
 		"-e",
@@ -58,7 +88,8 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	rsyncCmd = append(rsyncCmd, dst)
 
 	if r.config.Debug {
-		fmt.Printf("🔨 Comando rsync: %s\n", strings.Join(rsyncCmd, " "))
+		fmt.Printf("🔨 Executando comando rsync:\n")
+		fmt.Printf("   %s\n", strings.Join(rsyncCmd, " "))
 	}
 
 	// Execute rsync
@@ -66,7 +97,14 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	if r.config.Debug {
+		fmt.Printf("⏳ Iniciando transferência...\n")
+	}
+
 	if err := cmd.Run(); err != nil {
+		if r.config.Debug {
+			fmt.Printf("❌ Erro ao executar rsync: %v\n", err)
+		}
 		return fmt.Errorf("erro ao executar rsync: %w", err)
 	}
 

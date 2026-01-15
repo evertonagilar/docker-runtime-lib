@@ -188,3 +188,43 @@ func normalizeCopyDstPath(dst string) string {
 	}
 	return rel
 }
+
+// getRsyncBinPath returns the rsync binary path based on the operating system
+func getRsyncBinPath() string {
+	if runtime.GOOS == "windows" {
+		// On Windows, rsync is typically available through WSL, Git Bash, or Cygwin
+		// Try to find it in PATH first
+		if path, err := exec.LookPath("rsync"); err == nil {
+			return path
+		}
+		// Common Windows locations
+		commonPaths := []string{
+			"C:\\msys64\\usr\\bin\\rsync.exe",
+			"C:\\cygwin64\\bin\\rsync.exe",
+		}
+		for _, path := range commonPaths {
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
+		// Fallback to just "rsync" and hope it's in PATH
+		return "rsync"
+	}
+	// On Unix-like systems (Linux, macOS), try to find rsync in PATH
+	if path, err := exec.LookPath("rsync"); err == nil {
+		return path
+	}
+	// Common Unix locations
+	commonPaths := []string{
+		"/usr/bin/rsync",
+		"/usr/local/bin/rsync",
+		"/opt/homebrew/bin/rsync", // macOS with Homebrew on Apple Silicon
+	}
+	for _, path := range commonPaths {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	// Fallback to just "rsync" and hope it's in PATH
+	return "rsync"
+}
