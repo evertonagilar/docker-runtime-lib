@@ -255,3 +255,9 @@ func normalizeRsyncPath(path string) string {
 
 	return path
 }
+
+// shellQuote quotes a string for safe use in a shell command
+func shellQuote(s string) string {
+	// Use single quotes and escape any single quotes in the string
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}

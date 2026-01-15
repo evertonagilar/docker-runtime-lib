@@ -104,7 +104,29 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 
 	// Execute rsync
-	cmd := exec.Command(rsyncCmd[0], rsyncCmd[1:]...)
+	var cmd *exec.Cmd
+
+	if runtime.GOOS == "windows" {
+		// On Windows, we need to use a shell to properly handle the -e parameter
+		// Build the full command as a string for the shell
+		shellCmd := fmt.Sprintf("%s -av --progress -e %s :%s %s",
+			shellQuote(rsyncPath),
+			shellQuote(kubectlExec),
+			shellQuote(src),
+			shellQuote(rsyncDst))
+
+		if r.config.Debug {
+			fmt.Printf("🐚 Comando shell (Windows):\n")
+			fmt.Printf("   sh -c %s\n", shellQuote(shellCmd))
+		}
+
+		// Use sh from Cygwin/MSYS2
+		cmd = exec.Command("sh", "-c", shellCmd)
+	} else {
+		// On Unix-like systems, exec.Command handles arguments correctly
+		cmd = exec.Command(rsyncCmd[0], rsyncCmd[1:]...)
+	}
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
