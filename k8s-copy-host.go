@@ -34,7 +34,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	// Build rsync command using kubectl exec as transport
 	// rsync -av --progress -e "kubectl exec -i POD -- " :SRC DST
 	rsyncCmd := []string{
-		"rsync",
+		"/usr/bin/rsync",
 		"-av",
 		"--progress",
 		"-e",
