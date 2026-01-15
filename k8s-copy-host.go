@@ -177,7 +177,7 @@ func (r KubernetesRuntime) copyToHostUsingTar(
 	return nil
 }
 
-// copyChunkToHost downloads a chunk file without extracting (just the raw tar stream)
+// copyChunkToHost downloads a chunk file as raw data (using cat)
 func (r KubernetesRuntime) copyChunkToHost(
 	src,
 	pod,
@@ -186,7 +186,7 @@ func (r KubernetesRuntime) copyChunkToHost(
 	dst string,
 ) error {
 
-	// --- kubectl exec tar ---
+	// Use cat to download raw chunk data (not tar!)
 	execArgs := []string{"exec", pod}
 
 	if container != "" {
@@ -196,26 +196,12 @@ func (r KubernetesRuntime) copyChunkToHost(
 		execArgs = append(execArgs, "-n", namespace)
 	}
 
-	srcDir := "/"
-	srcFile := src
-	if idx := strings.LastIndex(src, "/"); idx >= 0 {
-		srcDir = src[:idx]
-		if srcDir == "" {
-			srcDir = "/"
-		}
-		srcFile = src[idx+1:]
-	}
-
-	execArgs = append(execArgs,
-		"--",
-		"tar", "-cf", "-",
-		"-C", srcDir,
-		srcFile,
-	)
+	// Use cat to output raw file data
+	execArgs = append(execArgs, "--", "cat", src)
 
 	kubectlCmd := r.buildKubectlCmd(true, execArgs...)
 
-	// Create output file directly (no .tar extension, no extraction)
+	// Create output file
 	outFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("erro ao criar arquivo chunk: %w", err)
