@@ -74,9 +74,17 @@ func (r KubernetesRuntime) copyToHostUsingTar(src, podOrContainerName, mainConta
 		execArgs = append(execArgs, "-n", namespace)
 	}
 
-	// Get the directory and filename
-	srcDir := filepath.Dir(src)
-	srcFile := filepath.Base(src)
+	// Get the directory and filename (use Unix path separator for remote paths)
+	// filepath.Dir/Base use OS-specific separators, but src is a Unix path from the pod
+	srcDir := "/"
+	srcFile := src
+	if idx := strings.LastIndex(src, "/"); idx >= 0 {
+		srcDir = src[:idx]
+		if srcDir == "" {
+			srcDir = "/"
+		}
+		srcFile = src[idx+1:]
+	}
 
 	// Tar command: tar -cf - -C /dir filename
 	execArgs = append(execArgs, "--", "tar", "-cf", "-", "-C", srcDir, srcFile)
