@@ -65,7 +65,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	}
 
 	// Unix/Linux: use kubectl cp
-	return r.copyToHostUsingKubectlCp(src, podOrContainerName, mainContainerName, namespace, dst)
+	return r.copyToHostUsingTar(src, podOrContainerName, mainContainerName, namespace, dst)
 }
 
 func (r KubernetesRuntime) copyToHostUsingTar(
