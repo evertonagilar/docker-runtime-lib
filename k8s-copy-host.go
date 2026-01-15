@@ -177,7 +177,7 @@ func (r KubernetesRuntime) copyToHostUsingTar(
 	return nil
 }
 
-// copyChunkToHost downloads a chunk file as raw data (using cat)
+// copyChunkToHost downloads a chunk file as TAR (will be extracted later)
 func (r KubernetesRuntime) copyChunkToHost(
 	src,
 	pod,
@@ -186,7 +186,7 @@ func (r KubernetesRuntime) copyChunkToHost(
 	dst string,
 ) error {
 
-	// Use cat to download raw chunk data (not tar!)
+	// Use tar to download chunk
 	execArgs := []string{"exec", pod}
 
 	if container != "" {
@@ -196,12 +196,26 @@ func (r KubernetesRuntime) copyChunkToHost(
 		execArgs = append(execArgs, "-n", namespace)
 	}
 
-	// Use cat to output raw file data
-	execArgs = append(execArgs, "--", "cat", src)
+	srcDir := "/"
+	srcFile := src
+	if idx := strings.LastIndex(src, "/"); idx >= 0 {
+		srcDir = src[:idx]
+		if srcDir == "" {
+			srcDir = "/"
+		}
+		srcFile = src[idx+1:]
+	}
+
+	execArgs = append(execArgs,
+		"--",
+		"tar", "-cf", "-",
+		"-C", srcDir,
+		srcFile,
+	)
 
 	kubectlCmd := r.buildKubectlCmd(true, execArgs...)
 
-	// Create output file
+	// Create output file (TAR format)
 	outFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("erro ao criar arquivo chunk: %w", err)
@@ -316,8 +330,50 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 		localChunks = append(localChunks, localChunk)
 	}
 
-	// --- 4) Reassemble in Go ---
-	fmt.Printf("🔗 Juntando chunks...\n")
+	// --- 4) Extract each chunk TAR and reassemble ---
+	fmt.Printf("🔗 Extraindo e juntando chunks...\n")
+
+	// Detect tar path
+	tarPath := "tar"
+	if runtime.GOOS == "windows" {
+		systemRoot := os.Getenv("SystemRoot")
+		if systemRoot == "" {
+			systemRoot = "C:\\Windows"
+		}
+		tarPath = filepath.Join(systemRoot, "System32", "tar.exe")
+	}
+
+	tmpDir := filepath.Dir(dst)
+	extractedChunks := make([]string, 0, len(localChunks))
+
+	// Extract each chunk TAR
+	for i, localChunk := range localChunks {
+		fmt.Printf("� Extraindo chunk %d/%d...\n", i+1, len(localChunks))
+
+		// Extract tar
+		tarCmd := exec.Command(tarPath, "-xf", localChunk, "-C", tmpDir)
+		tarCmd.Stderr = os.Stderr
+
+		if err := tarCmd.Run(); err != nil {
+			// Cleanup
+			for _, lc := range localChunks {
+				os.Remove(lc)
+			}
+			for _, ec := range extractedChunks {
+				os.Remove(ec)
+			}
+			return fmt.Errorf("erro ao extrair chunk %d: %w", i, err)
+		}
+
+		// The extracted file has the original chunk name (e.g., chunk_sipac.ear_aa)
+		// We need to find it
+		chunkBaseName := filepath.Base(chunks[i])
+		extractedChunk := filepath.Join(tmpDir, chunkBaseName)
+		extractedChunks = append(extractedChunks, extractedChunk)
+	}
+
+	// Now join the extracted chunks
+	fmt.Printf("🔗 Juntando arquivos extraídos...\n")
 
 	outFile, err := os.Create(dst)
 	if err != nil {
@@ -325,14 +381,17 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 		for _, lc := range localChunks {
 			os.Remove(lc)
 		}
+		for _, ec := range extractedChunks {
+			os.Remove(ec)
+		}
 		return fmt.Errorf("erro ao criar arquivo final: %w", err)
 	}
 	defer outFile.Close()
 
-	for i, localChunk := range localChunks {
-		chunkFile, err := os.Open(localChunk)
+	for i, extractedChunk := range extractedChunks {
+		chunkFile, err := os.Open(extractedChunk)
 		if err != nil {
-			return fmt.Errorf("erro ao abrir chunk %d: %w", i, err)
+			return fmt.Errorf("erro ao abrir chunk extraído %d: %w", i, err)
 		}
 
 		written, err := io.Copy(outFile, chunkFile)
@@ -350,9 +409,14 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 	// --- 5) Cleanup ---
 	fmt.Printf("🧹 Limpando chunks temporários...\n")
 
-	// Remove local chunks
+	// Remove local chunk TARs
 	for _, lc := range localChunks {
 		os.Remove(lc)
+	}
+
+	// Remove extracted chunks
+	for _, ec := range extractedChunks {
+		os.Remove(ec)
 	}
 
 	// Remove chunks from pod
