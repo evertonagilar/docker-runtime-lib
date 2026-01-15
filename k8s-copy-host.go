@@ -57,7 +57,7 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 	// Use different approaches for Windows vs Unix/Linux
 	if runtime.GOOS == "windows" {
 		// For large files (> 30MB), use chunked transfer
-		const chunkSizeLimit = 30 * 1024 * 1024 // 30MB
+		const chunkSizeLimit = 10 * 1024 * 1024 // 0MB
 		if fileSize > chunkSizeLimit {
 			return r.copyToHostUsingChunks(src, podOrContainerName, mainContainerName, namespace, dst, fileSize)
 		}
@@ -245,10 +245,10 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 
 	fmt.Printf("📦 Arquivo grande detectado (%.2f MB) - usando transferência em chunks\n", float64(fileSize)/(1024*1024))
 
-	const chunkSize = 30 * 1024 * 1024 // 30MB
+	const chunkSize = 10 * 1024 * 1024 // 10MB
 	numChunks := (fileSize + chunkSize - 1) / chunkSize
 
-	fmt.Printf("📊 Dividindo em %d chunks de ~30MB\n", numChunks)
+	fmt.Printf("📊 Dividindo em %d chunks de ~10MB\n", numChunks)
 
 	// --- 1) Split file in pod ---
 	srcDir := "/"
@@ -271,7 +271,7 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 	if namespace != "" {
 		splitArgs = append(splitArgs, "-n", namespace)
 	}
-	splitArgs = append(splitArgs, "--", "split", "-b", "30M", src, chunkPrefix)
+	splitArgs = append(splitArgs, "--", "split", "-b", "10M", src, chunkPrefix)
 
 	splitCmd := r.buildKubectlCmd(true, splitArgs...)
 	splitCmd.Stderr = os.Stderr
@@ -351,7 +351,7 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 		fmt.Printf("� Extraindo chunk %d/%d...\n", i+1, len(localChunks))
 		// Wait for filesystem sync on Windows
 		if runtime.GOOS == "windows" {
-			time.Sleep(1 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 
 		// Extract tar
