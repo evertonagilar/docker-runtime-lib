@@ -81,8 +81,8 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 func (r KubernetesRuntime) copyChunk(src, podOrContainerName, mainContainerName, namespace, tmpDir string, chunkIndex int, offset, size int64) error {
 	chunkFile := filepath.Join(tmpDir, fmt.Sprintf("chunk_%04d", chunkIndex))
 
-	// Extract chunk using dd and calculate MD5
-	script := fmt.Sprintf("dd if=%s bs=1 skip=%d count=%d 2>/dev/null | tee >(md5sum >&2) | base64 -w 0", src, offset, size)
+	// Step 1: Extract chunk and encode to base64
+	script := fmt.Sprintf("dd if=%s bs=1 skip=%d count=%d 2>/dev/null | base64 -w 0", src, offset, size)
 
 	execArgs := []string{"exec", podOrContainerName}
 	if mainContainerName != "" {
@@ -93,27 +93,30 @@ func (r KubernetesRuntime) copyChunk(src, podOrContainerName, mainContainerName,
 
 	cmd := r.buildKubectlCmd(true, execArgs...)
 
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("erro ao executar comando: %w, output: %s", err, string(output))
+		return fmt.Errorf("erro ao extrair chunk: %w", err)
 	}
 
-	// Parse output: stderr has MD5, stdout has base64 data
-	lines := strings.Split(string(output), "\n")
-	var base64Data, remoteMD5 string
+	base64Data := strings.TrimSpace(string(output))
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, " ") && len(line) == 34 { // MD5 hash format
-			remoteMD5 = strings.Fields(line)[0]
-		} else if len(line) > 0 && !strings.Contains(line, "+") && !strings.Contains(line, "records") {
-			base64Data += line
-		}
+	// Step 2: Calculate MD5 of the same chunk on remote
+	md5Script := fmt.Sprintf("dd if=%s bs=1 skip=%d count=%d 2>/dev/null | md5sum | awk '{print $1}'", src, offset, size)
+
+	md5Args := []string{"exec", podOrContainerName}
+	if mainContainerName != "" {
+		md5Args = append(md5Args, "-c", mainContainerName)
+	}
+	md5Args = append(md5Args, "--", "sh", "-c", md5Script)
+	md5Args = addNamespaceArg(namespace, md5Args)
+
+	md5Cmd := r.buildKubectlCmd(true, md5Args...)
+	md5Output, err := md5Cmd.Output()
+	if err != nil {
+		return fmt.Errorf("erro ao calcular MD5 remoto: %w", err)
 	}
 
-	if remoteMD5 == "" {
-		return fmt.Errorf("não foi possível obter MD5 do chunk remoto")
-	}
+	remoteMD5 := strings.TrimSpace(string(md5Output))
 
 	// Decode base64
 	decoded := make([]byte, len(base64Data)*3/4+3)
