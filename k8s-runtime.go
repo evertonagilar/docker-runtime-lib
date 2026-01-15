@@ -662,7 +662,7 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 
 	// For directories or when atomic copy is not needed, use direct copy
 	if srcInfo.IsDir() || !useAtomicCopy {
-		copyArgs := []string{"cp", fileName, fmt.Sprintf("%s:%s", podOrContainerName, dst)}
+		copyArgs := []string{"cp", fileName, fmt.Sprintf("%s:%s", podOrContainerName, dst), "--retries=6"}
 		if mainContainerName != "" {
 			copyArgs = append(copyArgs, "-c", mainContainerName)
 		}
@@ -689,7 +689,7 @@ func (r KubernetesRuntime) CopyToContainer(src, podOrContainerName, mainContaine
 	tmpDestPath := path.Join(destDir, tmpName)
 
 	// Copia o arquivo para o container com nome temporário
-	copyArgs := []string{"cp", fileName, fmt.Sprintf("%s:%s", podOrContainerName, tmpDestPath)}
+	copyArgs := []string{"cp", fileName, fmt.Sprintf("%s:%s", podOrContainerName, tmpDestPath), "--retries=6"}
 	if mainContainerName != "" {
 		copyArgs = append(copyArgs, "-c", mainContainerName)
 	}
