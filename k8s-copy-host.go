@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -63,13 +64,6 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		fmt.Printf("🔧 Binário rsync detectado: %s\n", rsyncPath)
 	}
 
-	rsyncCmd := []string{
-		rsyncPath,
-		"-av",
-		"--progress",
-		"-e",
-	}
-
 	// Build kubectl exec command for rsync transport
 	kubectlExec := fmt.Sprintf("kubectl exec -i %s", podOrContainerName)
 	if mainContainerName != "" {
@@ -79,13 +73,30 @@ func (r KubernetesRuntime) CopyToHost(src, podOrContainerName, mainContainerName
 		kubectlExec += fmt.Sprintf(" -n %s", namespace)
 	}
 	if r.config.Kubeconfig != "" {
-		kubectlExec += fmt.Sprintf(" --kubeconfig %s", r.config.Kubeconfig)
+		// On Windows, wrap the kubeconfig path in quotes if it contains spaces
+		kubeconfigPath := r.config.Kubeconfig
+		if runtime.GOOS == "windows" && strings.Contains(kubeconfigPath, " ") {
+			kubeconfigPath = fmt.Sprintf("'%s'", kubeconfigPath)
+		}
+		kubectlExec += fmt.Sprintf(" --kubeconfig %s", kubeconfigPath)
 	}
 	kubectlExec += " --"
 
-	rsyncCmd = append(rsyncCmd, kubectlExec)
-	rsyncCmd = append(rsyncCmd, fmt.Sprintf(":%s", src))
-	rsyncCmd = append(rsyncCmd, dst)
+	// Normalize destination path for rsync (Cygwin/MSYS2 on Windows expect forward slashes)
+	rsyncDst := normalizeRsyncPath(dst)
+	if r.config.Debug && rsyncDst != dst {
+		fmt.Printf("📝 Destino normalizado para rsync: %s\n", rsyncDst)
+	}
+
+	rsyncCmd := []string{
+		rsyncPath,
+		"-av",
+		"--progress",
+		"-e",
+		kubectlExec, // This will be properly quoted as a single argument
+		fmt.Sprintf(":%s", src),
+		rsyncDst,
+	}
 
 	if r.config.Debug {
 		fmt.Printf("🔨 Executando comando rsync:\n")

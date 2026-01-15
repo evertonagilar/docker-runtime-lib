@@ -228,3 +228,30 @@ func getRsyncBinPath() string {
 	// Fallback to just "rsync" and hope it's in PATH
 	return "rsync"
 }
+
+// normalizeRsyncPath converts Windows paths to Unix-style paths for Cygwin/MSYS2 rsync
+func normalizeRsyncPath(path string) string {
+	if runtime.GOOS != "windows" {
+		return path
+	}
+
+	// Convert backslashes to forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	// Convert Windows drive letters to Cygwin/MSYS2 format
+	// C:/path -> /cygdrive/c/path (Cygwin) or /c/path (MSYS2)
+	// We'll use MSYS2 format as it's more common with Git Bash
+	if len(path) >= 2 && path[1] == ':' {
+		drive := strings.ToLower(string(path[0]))
+		rest := path[2:]
+		// Check if we're using Cygwin rsync
+		rsyncPath := getRsyncBinPath()
+		if strings.Contains(strings.ToLower(rsyncPath), "cygwin") {
+			return "/cygdrive/" + drive + rest
+		}
+		// MSYS2/Git Bash format
+		return "/" + drive + rest
+	}
+
+	return path
+}
