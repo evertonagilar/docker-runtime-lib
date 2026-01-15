@@ -349,6 +349,10 @@ func (r KubernetesRuntime) copyToHostUsingChunks(
 	// Extract each chunk TAR
 	for i, localChunk := range localChunks {
 		fmt.Printf("� Extraindo chunk %d/%d...\n", i+1, len(localChunks))
+		// Wait for filesystem sync on Windows
+		if runtime.GOOS == "windows" {
+			time.Sleep(1 * time.Second)
+		}
 
 		// Extract tar
 		tarCmd := exec.Command(tarPath, "-xf", localChunk, "-C", tmpDir)
